@@ -96,7 +96,7 @@ fn main() -> ! {
         .text_color(BinaryColor::On)
         .build();
 
-        Text::with_baseline("Hello world!", Point::zero(), text_style, Baseline::Top)
+        Text::with_baseline("Hello world!", Point::new(25, 32), text_style, Baseline::Top)
             .draw(&mut display)
             .unwrap();
 
