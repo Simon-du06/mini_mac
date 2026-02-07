@@ -22,7 +22,8 @@ use embedded_graphics::{
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 
 #[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    esp_println::println!("{}", info);
     loop {}
 }
 
@@ -39,9 +40,13 @@ esp_bootloader_esp_idf::esp_app_desc!();
 #[main]
 fn main() -> ! {
     // generator version: 1.2.0
+    
+    esp_println::println!("=== Starting main ===");
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    esp_println::println!("Config created");
     let peripherals = esp_hal::init(config);
+    esp_println::println!("Peripherals initialized");
 
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 65536);
     // COEX needs more RAM - so we've added some more
@@ -51,31 +56,39 @@ fn main() -> ! {
     let sw_interrupt =
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
-    let radio_init = esp_radio::init().expect("Failed to initialize Wi-Fi/BLE controller");
-    let (mut _wifi_controller, _interfaces) =
-        esp_radio::wifi::new(&radio_init, peripherals.WIFI, Default::default())
-            .expect("Failed to initialize Wi-Fi controller");
+    let radio_init = esp_radio::init().expect("Failed to initialize radio controller");
+    esp_println::println!("Radio initialized");
+    
+    // WiFi initialization commented out - not needed for now
+    // let (mut _wifi_controller, _interfaces) =
+    //     esp_radio::wifi::new(&radio_init, peripherals.WIFI, Default::default())
+    //         .expect("Failed to initialize Wi-Fi controller");
+    // esp_println::println!("WiFi initialized");
+
     let _connector = BleConnector::new(&radio_init, peripherals.BT, Default::default());
     
     let sda = peripherals.GPIO6;
     let scl = peripherals.GPIO7;
-    
+
+    esp_println::println!("Etape 1: I2C setup");
     let i2c = I2c::new(
         peripherals.I2C0,
         esp_hal::i2c::master::Config::default(),
     )
-    .expect("Failed to initialize I2C")
+    .expect("Failed to initialize i2c")
     .with_sda(sda)
     .with_scl(scl);
 
-    let interface = I2CDisplayInterface::new_alternate_address(i2c);
+    let interface = I2CDisplayInterface::new(i2c);
     let mut display = Ssd1306::new(
         interface,
         DisplaySize128x64,
         DisplayRotation::Rotate0,
     ).into_buffered_graphics_mode();
-    display.init().expect("message");
+    esp_println::println!("Etape 2: Display setup");
+    display.init().unwrap();
 
+    esp_println::println!("Etape 3: Entering loop");
     loop {
         display.clear(BinaryColor::Off).unwrap();
         let text_style = MonoTextStyleBuilder::new()
