@@ -1180,6 +1180,7 @@ dependencies = [
  "esp-rtos",
  "smoltcp",
  "ssd1306",
+ "tinybmp",
 ]
 
 [[package]]
@@ -1610,6 +1611,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "tinybmp"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acb540c3e6f049f914d9c3eaf86ca415e264cf42d2b25bb5c24241af1a1e3aea"
+dependencies = [
+ "embedded-graphics",
 ]
 
 [[package]]

@@ -7,19 +7,20 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-use esp_hal::clock::CpuClock;
+use esp_hal::{clock::CpuClock, riscv::asm::nop};
 use esp_hal::i2c::master::I2c;
 use esp_hal::main;
 use esp_hal::timer::timg::TimerGroup;
 use esp_radio::ble::controller::BleConnector;
 
 use embedded_graphics::{
-    mono_font::{ascii::FONT_6X10, MonoTextStyleBuilder},
-    pixelcolor::BinaryColor,
-    prelude::*,
-    text::{Baseline, Text},
+    image::Image,
+    pixelcolor::Rgb565,
+    prelude::*
 };
+use esp_radio::wifi::new;
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
+use tinybmp::Bmp;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -88,19 +89,14 @@ fn main() -> ! {
     esp_println::println!("Etape 2: Display setup");
     display.init().unwrap();
 
-    esp_println::println!("Etape 3: Entering loop");
+    let bmp= Bmp::from_slice(include_bytes!("../asset/hello2.bmp")).expect("Failed to load BMP image");
+    let im: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(0, 0));
+
+    im.draw(&mut display.color_converted()).unwrap();
+
+    display.flush().unwrap();
     loop {
-        display.clear(BinaryColor::Off).unwrap();
-        let text_style = MonoTextStyleBuilder::new()
-        .font(&FONT_6X10)
-        .text_color(BinaryColor::On)
-        .build();
-
-        Text::with_baseline("Hello world!", Point::new(25, 32), text_style, Baseline::Top)
-            .draw(&mut display)
-            .unwrap();
-
-        display.flush().unwrap();
+        nop();
     }
     
 }
