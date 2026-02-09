@@ -18,9 +18,11 @@ use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::*
 };
-use esp_radio::wifi::new;
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use tinybmp::Bmp;
+
+use mini_mac::network::connect_wifi;
+
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -60,11 +62,10 @@ fn main() -> ! {
     let radio_init = esp_radio::init().expect("Failed to initialize radio controller");
     esp_println::println!("Radio initialized");
     
-    // WiFi initialization commented out - not needed for now
-    // let (mut _wifi_controller, _interfaces) =
-    //     esp_radio::wifi::new(&radio_init, peripherals.WIFI, Default::default())
-    //         .expect("Failed to initialize Wi-Fi controller");
-    // esp_println::println!("WiFi initialized");
+    let (mut wifi_controller, _interfaces) =
+        esp_radio::wifi::new(&radio_init, peripherals.WIFI, Default::default())
+            .expect("Failed to initialize Wi-Fi controller");
+    esp_println::println!("WiFi initialized");
 
     let _connector = BleConnector::new(&radio_init, peripherals.BT, Default::default());
     
@@ -89,12 +90,14 @@ fn main() -> ! {
     esp_println::println!("Etape 2: Display setup");
     display.init().unwrap();
 
-    let bmp= Bmp::from_slice(include_bytes!("../asset/hello2.bmp")).expect("Failed to load BMP image");
+    let bmp= Bmp::from_slice(include_bytes!("../asset/images/hello2.bmp")).expect("Failed to load BMP image");
     let im: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(0, 0));
 
     im.draw(&mut display.color_converted()).unwrap();
-
     display.flush().unwrap();
+
+    connect_wifi::connect_wifi(&mut wifi_controller).expect("Failed to connect WiFi");
+
     loop {
         nop();
     }
