@@ -11,6 +11,14 @@ pub fn connect_wifi(wifi_controller: &mut WifiController) -> Result<(), WifiErro
     wifi_controller.start()?;
     wifi_controller.connect()?;
 
+    loop {
+        match wifi_controller.is_connected() {
+            Ok(true) => break,
+            Ok(false) => {}
+            Err(e) => return Err(e),
+        }
+    }
+
     esp_println::println!("WiFi connected!");
     Ok(())
 }
