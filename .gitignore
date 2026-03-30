@@ -1,6 +1,8 @@
 # will have compiled files and executables
 debug/
 target/
+target-espidf/
+.embuild/
 
 #env
 .cargo/config.toml
