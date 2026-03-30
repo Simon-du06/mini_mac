@@ -1,105 +1,70 @@
-#![no_std]
-#![no_main]
-#![deny(
-    clippy::mem_forget,
-    reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
-    holding buffers for the duration of a data transfer."
-)]
-#![deny(clippy::large_stack_frames)]
+use std::{thread, time::Duration};
 
-use esp_hal::{clock::CpuClock, riscv::asm::nop};
-use esp_hal::i2c::master::I2c;
-use esp_hal::main;
-use esp_hal::timer::timg::TimerGroup;
-use esp_radio::ble::controller::BleConnector;
-
-use embedded_graphics::{
-    image::Image,
-    pixelcolor::Rgb565,
-    prelude::*
+use anyhow::{anyhow, Result};
+use embedded_graphics::{image::Image, pixelcolor::Rgb565, prelude::*};
+use esp_idf_svc::{
+    eventloop::EspSystemEventLoop,
+    hal::{
+        i2c::{config::Config as I2cConfig, I2cDriver},
+        peripherals::Peripherals,
+        prelude::Hertz,
+    },
+    log::EspLogger,
+    nvs::EspDefaultNvsPartition,
+    wifi::{BlockingWifi, EspWifi},
 };
+use mini_mac::network::connect_wifi;
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use tinybmp::Bmp;
 
-use mini_mac::network::connect_wifi;
+fn main() -> Result<()> {
+    esp_idf_svc::sys::link_patches();
+    EspLogger::initialize_default();
 
+    log::info!("Starting main");
 
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    esp_println::println!("{}", info);
-    loop {}
-}
+    let peripherals = Peripherals::take()?;
+    let sys_loop = EspSystemEventLoop::take()?;
+    let nvs = EspDefaultNvsPartition::take()?;
 
-extern crate alloc;
+    let modem = peripherals.modem;
+    let i2c0 = peripherals.i2c0;
+    let pins = peripherals.pins;
 
-// This creates a default app-descriptor required by the esp-idf bootloader.
-// For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
-esp_bootloader_esp_idf::esp_app_desc!();
-
-#[allow(
-    clippy::large_stack_frames,
-    reason = "it's not unusual to allocate larger buffers etc. in main"
-)]
-#[main]
-fn main() -> ! {
-    // generator version: 1.2.0
-    
-    esp_println::println!("=== Starting main ===");
-
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    esp_println::println!("Config created");
-    let peripherals = esp_hal::init(config);
-    esp_println::println!("Peripherals initialized");
-
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 65536);
-    // COEX needs more RAM - so we've added some more
-    esp_alloc::heap_allocator!(size: 64 * 1024);
-
-    let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let sw_interrupt =
-        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
-    let radio_init = esp_radio::init().expect("Failed to initialize radio controller");
-    esp_println::println!("Radio initialized");
-    
-    let (mut wifi_controller, _interfaces) =
-        esp_radio::wifi::new(&radio_init, peripherals.WIFI, Default::default())
-            .expect("Failed to initialize Wi-Fi controller");
-    esp_println::println!("WiFi initialized");
-
-    let _connector = BleConnector::new(&radio_init, peripherals.BT, Default::default());
-    
-    let sda = peripherals.GPIO6;
-    let scl = peripherals.GPIO7;
-
-    esp_println::println!("Etape 1: I2C setup");
-    let i2c = I2c::new(
-        peripherals.I2C0,
-        esp_hal::i2c::master::Config::default(),
-    )
-    .expect("Failed to initialize i2c")
-    .with_sda(sda)
-    .with_scl(scl);
+    let i2c = I2cDriver::new(
+        i2c0,
+        pins.gpio6,
+        pins.gpio7,
+        &I2cConfig::new().baudrate(Hertz(400_000)),
+    )?;
 
     let interface = I2CDisplayInterface::new(i2c);
-    let mut display = Ssd1306::new(
-        interface,
-        DisplaySize128x64,
-        DisplayRotation::Rotate0,
-    ).into_buffered_graphics_mode();
-    esp_println::println!("Etape 2: Display setup");
-    display.init().unwrap();
+    let mut display =
+        Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+            .into_buffered_graphics_mode();
+    display
+        .init()
+        .map_err(|err| anyhow!("Failed to initialize display: {err:?}"))?;
 
-    let bmp= Bmp::from_slice(include_bytes!("../asset/images/hello2.bmp")).expect("Failed to load BMP image");
-    let im: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(0, 0));
+    let bmp = Bmp::from_slice(include_bytes!("../asset/images/hello2.bmp"))
+        .map_err(|err| anyhow!("Failed to parse boot bitmap: {err:?}"))?;
+    let image: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(0, 0));
 
-    im.draw(&mut display.color_converted()).unwrap();
-    display.flush().unwrap();
+    image
+        .draw(&mut display.color_converted())
+        .map_err(|err| anyhow!("Failed to draw boot bitmap: {err:?}"))?;
+    display
+        .flush()
+        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
 
-    connect_wifi::connect_wifi(&mut wifi_controller).expect("Failed to connect WiFi");
+    let mut wifi =
+        BlockingWifi::wrap(EspWifi::new(modem, sys_loop.clone(), Some(nvs))?, sys_loop)?;
+    connect_wifi::connect_wifi(&mut wifi)?;
+
+    let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
+    log::info!("Wi-Fi DHCP info: {ip_info:?}");
 
     loop {
-        nop();
+        thread::sleep(Duration::from_secs(1));
     }
-    
 }
