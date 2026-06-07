@@ -1,7 +1,7 @@
 use std::{thread, time::Duration};
 
-use anyhow::{anyhow, Result};
-use embedded_graphics::{image::Image, mono_font::{MonoTextStyleBuilder, ascii::FONT_10X20}, pixelcolor::{BinaryColor, Rgb565}, prelude::*, text::Text};
+use anyhow::{Ok, Result, anyhow};
+use embedded_graphics::{image::Image, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::FONT_10X20}, pixelcolor::{BinaryColor, Rgb565}, prelude::*, text::{Alignment, Baseline, TextStyle, TextStyleBuilder, Text}};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{
@@ -15,7 +15,7 @@ use esp_idf_svc::{
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
 };
-use mini_mac::network::{connect_wifi, geo::fetch_geo_info};
+use mini_mac::{network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{self, sync_weather::CurrentWeather}};
 use mini_mac::time::sync_time;
 use mini_mac::weather::sync_weather::fetch_weather;
 use ssd1306::{
@@ -32,6 +32,11 @@ type Display = Ssd1306<
     DisplaySize128x64,
     BufferedGraphicsMode<DisplaySize128x64>,
 >;
+
+const CENTER_MIDDLE_TEXT_STYLE: TextStyle = TextStyleBuilder::new()
+    .alignment(Alignment::Center)
+    .baseline(Baseline::Middle)
+    .build();
 
 fn init_display(i2c0: I2C0, sda: Gpio6, scl: Gpio7) -> Result<Display> {
     let i2c = I2cDriver::new(i2c0, sda, scl, &I2cConfig::new().baudrate(Hertz(400_000)))?;
@@ -58,6 +63,57 @@ fn show_boot_image(display: &mut Display) -> Result<()> {
         .flush()
         .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
 
+    Ok(())
+}
+
+fn draw_clock(
+    display: &mut Display,
+    h: u8, m: u8, s: u8,
+    style: MonoTextStyle<BinaryColor>,
+) -> Result<()> {
+    display
+        .clear(BinaryColor::Off)
+        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
+    Text::with_text_style(
+        &format!("{h:02}:{m:02}:{s:02}"),
+        Point::new(64, 32),
+        style,  CENTER_MIDDLE_TEXT_STYLE,
+    )
+    .draw(display)
+    .map_err(|err| anyhow!("Failed to draw clock: {err:?}"))?;
+    display
+        .flush()
+        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
+
+    Ok(())
+}
+
+fn draw_weather(
+    display: &mut Display,
+    weather: &CurrentWeather,
+    geo: &GeoInfo,
+    style: MonoTextStyle<BinaryColor>
+) -> Result<()> {
+    display
+        .clear(BinaryColor::Off)
+        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
+    Text::new(
+        &format!("{}", geo.city),
+        Point::new(5, 15),
+        style
+    )
+    .draw(display)
+    .map_err(|err| anyhow!("Failed to draw city: {err:?}"))?;
+    Text::with_text_style(
+        &format!("{:.1}°C", weather.temperature_2m),
+        Point::new(64, 32),
+        style,  CENTER_MIDDLE_TEXT_STYLE,
+    )
+    .draw(display)
+    .map_err(|err| anyhow!("Failed to draw temperature: {err:?}"))?;;;
+    display
+        .flush()
+        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
     Ok(())
 }
 
@@ -107,16 +163,14 @@ fn main() -> Result<()> {
 
     let style =MonoTextStyleBuilder::new()
     .font(&FONT_10X20)
-    .text_color(BinaryColor::On)   // pour un écran monochrome SSD1306
+    .text_color(BinaryColor::On)
     .build();
 
     loop {
-        display.clear(BinaryColor::Off);
-        Text::new(
-            &format!("{h:02}:{m:02}:{s:02}"), 
-            Point::new(24, 32), style).draw(&mut display);
-        display.flush();
+        draw_clock(&mut display, h, m, s, style)?;
         (h, m, s) = sync_time::get_local_time(geo.offset);
-        thread::sleep(Duration::from_secs(1));
+        thread::sleep(Duration::from_secs(5));
+        draw_weather(&mut display, &weather, &geo, style);
+        thread::sleep(Duration::from_secs(5));
     }
 }
