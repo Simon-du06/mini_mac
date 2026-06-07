@@ -17,6 +17,7 @@ use esp_idf_svc::{
 };
 use mini_mac::network::{connect_wifi, geo::fetch_geo_info};
 use mini_mac::time::sync_time;
+use mini_mac::weather::sync_weather::fetch_weather;
 use ssd1306::{
     mode::{BufferedGraphicsMode, DisplayConfig},
     prelude::{DisplaySize128x64, DisplayRotation, I2CInterface},
@@ -93,6 +94,13 @@ fn main() -> Result<()> {
     let geo = fetch_geo_info()?;
     log::info!("City: {}, Timezone offset: {}s", geo.city, geo.offset);
 
+    let weather = fetch_weather(geo.lat, geo.lon)?;
+    log::info!(
+        "Weather: {}°C, code {}",
+        weather.temperature_2m,
+        weather.weathercode
+    );
+
     sync_time::sync_ntp()?;
     let (mut h, mut m, mut s) = sync_time::get_local_time(geo.offset);
     log::info!("Local time: {h:02}:{m:02}:{s:02}");
@@ -106,7 +114,7 @@ fn main() -> Result<()> {
         display.clear(BinaryColor::Off);
         Text::new(
             &format!("{h:02}:{m:02}:{s:02}"), 
-            Point::new(28, 32), style).draw(&mut display);
+            Point::new(24, 32), style).draw(&mut display);
         display.flush();
         (h, m, s) = sync_time::get_local_time(geo.offset);
         thread::sleep(Duration::from_secs(1));
