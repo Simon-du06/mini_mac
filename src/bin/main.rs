@@ -1,7 +1,7 @@
 use std::{thread, time::Duration};
 
 use anyhow::{Ok, Result, anyhow};
-use embedded_graphics::{image::Image, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::FONT_10X20}, pixelcolor::{BinaryColor, Rgb565}, prelude::*, text::{Alignment, Baseline, TextStyle, TextStyleBuilder, Text}};
+use embedded_graphics::{image::{Image, ImageRaw}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::FONT_10X20}, pixelcolor::{BinaryColor, Rgb565}, prelude::*, text::{Alignment, Baseline, Text, TextStyle, TextStyleBuilder}};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{
@@ -15,7 +15,7 @@ use esp_idf_svc::{
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
 };
-use mini_mac::{network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{self, sync_weather::CurrentWeather}};
+use mini_mac::{network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{icons, sync_weather::{CurrentWeather, get_weather_icon}}};
 use mini_mac::time::sync_time;
 use mini_mac::weather::sync_weather::fetch_weather;
 use ssd1306::{
@@ -35,6 +35,11 @@ type Display = Ssd1306<
 
 const CENTER_MIDDLE_TEXT_STYLE: TextStyle = TextStyleBuilder::new()
     .alignment(Alignment::Center)
+    .baseline(Baseline::Middle)
+    .build();
+
+const CENTER_RIGHT_TEXT_STYLE: TextStyle = TextStyleBuilder::new()
+    .alignment(Alignment::Right)
     .baseline(Baseline::Middle)
     .build();
 
@@ -94,23 +99,29 @@ fn draw_weather(
     geo: &GeoInfo,
     style: MonoTextStyle<BinaryColor>
 ) -> Result<()> {
+    let raw: ImageRaw<BinaryColor> = ImageRaw::new(get_weather_icon(weather.weathercode), icons::ICON_LARGE_WIDTH);
+    let image = Image::new(&raw, Point::new(5, 5));
+
     display
         .clear(BinaryColor::Off)
         .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
-    Text::new(
+    image
+        .draw(&mut display.color_converted())
+        .map_err(|err| anyhow!("Failed to draw icon bitmap: {err:?}"))?;
+    Text::with_text_style(
         &format!("{}", geo.city),
-        Point::new(5, 15),
-        style
+        Point::new(128, 54),
+        style, CENTER_RIGHT_TEXT_STYLE
     )
     .draw(display)
     .map_err(|err| anyhow!("Failed to draw city: {err:?}"))?;
     Text::with_text_style(
         &format!("{:.1}°C", weather.temperature_2m),
-        Point::new(64, 32),
-        style,  CENTER_MIDDLE_TEXT_STYLE,
+        Point::new(128, 32),
+        style,  CENTER_RIGHT_TEXT_STYLE,
     )
     .draw(display)
-    .map_err(|err| anyhow!("Failed to draw temperature: {err:?}"))?;;;
+    .map_err(|err| anyhow!("Failed to draw temperature: {err:?}"))?;
     display
         .flush()
         .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
@@ -170,7 +181,7 @@ fn main() -> Result<()> {
         draw_clock(&mut display, h, m, s, style)?;
         (h, m, s) = sync_time::get_local_time(geo.offset);
         thread::sleep(Duration::from_secs(5));
-        draw_weather(&mut display, &weather, &geo, style);
+        draw_weather(&mut display, &weather, &geo, style)?;
         thread::sleep(Duration::from_secs(5));
     }
 }
