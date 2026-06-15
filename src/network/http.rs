@@ -2,11 +2,15 @@ use anyhow::{anyhow, Result};
 use embedded_svc::http::client::Client;
 use embedded_svc::http::Method;
 use embedded_svc::utils::io;
-use esp_idf_svc::http::client::EspHttpConnection;
+use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
 use log::{error, info};
 
 pub fn http_get(url: &str) -> Result<String> {
-    let mut client = Client::wrap(EspHttpConnection::new(&Default::default())?);
+    let config = Configuration {
+        crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
+        ..Default::default()
+    };
+    let mut client = Client::wrap(EspHttpConnection::new(&config)?);
     let headers = [("accept", "text/plain")];
     let request = client.request(Method::Get, url, &headers)?;
     let mut response = request.submit()?;
