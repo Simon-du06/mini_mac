@@ -5,8 +5,8 @@ use embedded_graphics::{image::{Image, ImageRaw}, mono_font::{MonoTextStyle, Mon
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{
-        gpio::{Gpio6, Gpio7},
-        i2c::{config::Config as I2cConfig, I2cDriver, I2C0},
+        gpio::{Gpio4, Gpio6, Gpio7, PinDriver},
+        i2c::{I2C0, I2cDriver, config::Config as I2cConfig},
         modem::Modem,
         peripherals::Peripherals,
         prelude::Hertz,
@@ -42,6 +42,22 @@ const CENTER_RIGHT_TEXT_STYLE: TextStyle = TextStyleBuilder::new()
     .alignment(Alignment::Right)
     .baseline(Baseline::Middle)
     .build();
+
+enum Screen {
+    Clock,
+    Weather,
+    Market,
+}
+
+impl Screen {
+    fn next(self) -> Self {
+        match self {
+            Screen::Clock => Screen::Weather,
+            Screen::Weather => Screen::Market,
+            Screen::Market  => Screen::Clock,
+        }
+    }
+}
 
 fn init_display(i2c0: I2C0, sda: Gpio6, scl: Gpio7) -> Result<Display> {
     let i2c = I2cDriver::new(i2c0, sda, scl, &I2cConfig::new().baudrate(Hertz(400_000)))?;
@@ -205,6 +221,8 @@ fn main() -> Result<()> {
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
+    let mut touch = PinDriver::input(peripherals.pins.gpio4)?;
+
     let mut display = init_display(peripherals.i2c0, peripherals.pins.gpio6, peripherals.pins.gpio7)?;
     show_boot_image(&mut display)?;
 
@@ -235,7 +253,18 @@ fn main() -> Result<()> {
     .text_color(BinaryColor::On)
     .build();
 
+    let mut was_touched = false;
+
+    let mut current_screen = Screen::Clock;
+
     loop {
+        let is_touched = touch.is_high();
+
+        if is_touched && !was_touched {
+            current_screen = current_screen.next();
+        }
+        was_touched = is_touched;
+        
         if last_fetch.elapsed() >= REFRESH_INTERVAL {
             if let Result::Ok(price) = fetch_btc_price() {
                 btc_history.push(price);
@@ -251,14 +280,19 @@ fn main() -> Result<()> {
             last_fetch = Instant::now();
         }
 
-        draw_clock(&mut display, h, m, s, style)?;
-        (h, m, s) = sync_time::get_local_time(geo.offset);
-        thread::sleep(Duration::from_secs(5));
+        match current_screen {
+            Screen::Clock => {
+                draw_clock(&mut display, h, m, s, style)?;
+                (h, m, s) = sync_time::get_local_time(geo.offset);
+            }
+            Screen::Weather => {
+                draw_weather(&mut display, &weather, &geo, style)?;
+            }
+            Screen::Market => {
+                draw_market(&mut display, &btc_history, style)?;
+            }
+        }
 
-        draw_weather(&mut display, &weather, &geo, style)?;
-        thread::sleep(Duration::from_secs(5));
-
-        draw_market(&mut display, &btc_history, style)?;
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_millis(200));
     }
 }
