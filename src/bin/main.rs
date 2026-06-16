@@ -5,7 +5,7 @@ use embedded_graphics::{image::{Image, ImageRaw}, mono_font::{MonoTextStyle, Mon
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{
-        gpio::{Gpio4, Gpio6, Gpio7, PinDriver},
+        gpio::{Gpio6, Gpio7, PinDriver},
         i2c::{I2C0, I2cDriver, config::Config as I2cConfig},
         modem::Modem,
         peripherals::Peripherals,
@@ -15,7 +15,7 @@ use esp_idf_svc::{
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
 };
-use mini_mac::{market::sync_market::fetch_btc_price, network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{icons, sync_weather::{CurrentWeather, get_weather_icon}}};
+use mini_mac::{market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock}, network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{icons, sync_weather::{CurrentWeather, get_weather_icon}}};
 use mini_mac::time::sync_time;
 use mini_mac::weather::sync_weather::fetch_weather;
 use ssd1306::{
@@ -46,6 +46,7 @@ const CENTER_RIGHT_TEXT_STYLE: TextStyle = TextStyleBuilder::new()
 enum Screen {
     Clock,
     Weather,
+    Crypto,
     Market,
 }
 
@@ -53,7 +54,8 @@ impl Screen {
     fn next(self) -> Self {
         match self {
             Screen::Clock => Screen::Weather,
-            Screen::Weather => Screen::Market,
+            Screen::Weather => Screen::Crypto,
+            Screen::Crypto => Screen::Market,
             Screen::Market  => Screen::Clock,
         }
     }
@@ -147,6 +149,7 @@ fn draw_weather(
 
 fn draw_market(
     display: &mut Display,
+    symbol: &str,
     history: &[f32],
     style: MonoTextStyle<BinaryColor>,
 ) -> Result<()> {
@@ -156,12 +159,12 @@ fn draw_market(
 
     let current_price = *history.last().unwrap_or(&0.0);
     Text::with_text_style(
-        &format!("BTC ${current_price:.0}"),
+        &format!("{symbol} ${current_price:.2}"),
         Point::new(64, 12),
         style, CENTER_MIDDLE_TEXT_STYLE,
     )
     .draw(display)
-    .map_err(|err| anyhow!("Failed to draw BTC price: {err:?}"))?;
+    .map_err(|err| anyhow!("Failed to draw price: {err:?}"))?;
 
     if history.len() >= 2 {
         let min = history.iter().cloned().fold(f32::INFINITY, f32::min);
@@ -221,7 +224,7 @@ fn main() -> Result<()> {
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
-    let mut touch = PinDriver::input(peripherals.pins.gpio4)?;
+    let touch = PinDriver::input(peripherals.pins.gpio4)?;
 
     let mut display = init_display(peripherals.i2c0, peripherals.pins.gpio6, peripherals.pins.gpio7)?;
     show_boot_image(&mut display)?;
@@ -243,6 +246,9 @@ fn main() -> Result<()> {
     let mut btc_history: Vec<f32> = vec![fetch_btc_price()?];
     let mut last_fetch = Instant::now();
     log::info!("BTC price: ${:.0}", btc_history[0]);
+
+    let mut stock_history: Vec<f32> = vec![fetch_stock("QCOM")?];
+    log::info!("QCOM price: ${:.0}", stock_history[0]);
 
     sync_time::sync_ntp()?;
     let (mut h, mut m, mut s) = sync_time::get_local_time(geo.offset);
@@ -277,6 +283,13 @@ fn main() -> Result<()> {
                 weather = weather_up;
                 log::info!("Weather: {}°C, code {}", weather.temperature_2m,weather.weathercode);
             }
+            if let Result::Ok(price) = fetch_stock("QCOM") {
+                stock_history.push(price);
+                if stock_history.len() > MAX_HISTORY {
+                    stock_history.remove(0);
+                }
+                log::info!("QCOM price: ${price:.0}");
+            }
             last_fetch = Instant::now();
         }
 
@@ -288,8 +301,11 @@ fn main() -> Result<()> {
             Screen::Weather => {
                 draw_weather(&mut display, &weather, &geo, style)?;
             }
+            Screen::Crypto => {
+                draw_market(&mut display, "BTC", &btc_history, style)?;
+            }
             Screen::Market => {
-                draw_market(&mut display, &btc_history, style)?;
+                draw_market(&mut display, "QCOM", &stock_history, style)?;
             }
         }
 
