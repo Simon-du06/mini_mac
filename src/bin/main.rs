@@ -232,6 +232,39 @@ fn draw_glucose(
     .draw(display)
     .map_err(|err| anyhow!("Failed to draw glucose: {err:?}"))?;
 
+    let glucose_values: Vec<f32> = history
+        .iter()
+        .rev()
+        .map(|x| x.sgv as f32)
+        .collect();
+
+    if glucose_values.len() > 3 {
+        let min = glucose_values.iter().cloned().fold(f32::INFINITY, f32::min);
+        let max = glucose_values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let range = (max - min).max(1.0);
+
+        const GRAPH_LEFT: i32 = 4;
+        const GRAPH_RIGHT: i32 = 124;
+        const GRAPH_TOP: i32 = 26;
+        const GRAPH_HEIGHT: i32 = 32;
+
+        let span = (GRAPH_RIGHT - GRAPH_LEFT) as f32 / (history.len() - 1) as f32;
+        let points: Vec<Point> = glucose_values
+            .iter()
+            .enumerate()
+            .map(|(i, &glucose)| {
+                let x = GRAPH_LEFT + (i as f32 * span) as i32;
+                let y = GRAPH_TOP + GRAPH_HEIGHT - ((glucose - min) / range * GRAPH_HEIGHT as f32) as i32;
+                Point::new(x, y)
+            })
+            .collect();
+
+        Polyline::new(&points)
+            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+            .draw(display)
+            .map_err(|err| anyhow!("Failed to draw glucose trend: {err:?}"))?;
+    }
+
     display
         .flush()
         .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
