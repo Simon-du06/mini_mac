@@ -210,9 +210,14 @@ fn draw_glucose(
         .clear(BinaryColor::Off)
         .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
 
-    let current_sugar = *&history.first().unwrap().sgv;
+    let current_sugar = history.first();
+    let message = match current_sugar {
+        Some(sugar) => format!("Glucose: {}", sugar.sgv),
+        None => "NO DATA".to_string(),
+    };
+
     Text::with_text_style(
-        &format!("Glucose {current_sugar}"),
+        &message,
         Point::new(64, 12),
         style, CENTER_MIDDLE_TEXT_STYLE,
     )
@@ -281,10 +286,13 @@ fn main() -> Result<()> {
     const GLUCOSE_BROADCAST: u16 = 17580;
     let mut glucose_history: Vec<GlucoseDatas> = vec![];
     match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
+        Result::Ok(glucose) if glucose.is_empty() => {
+            log::warn!("Juggluco returned no glucose data");
+        }
         Result::Ok(glucose) => {
-            log::info!("Glucose: ${}", glucose.first().unwrap().sgv);
+            log::info!("Glucose: {}", glucose[0].sgv);
             glucose_history = glucose;
-        } 
+        }
         Result::Err(error) => {
             log::warn!("Failed to fetch glucose data : {error}");
         }
@@ -338,8 +346,11 @@ fn main() -> Result<()> {
             }
 
             match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
+                Result::Ok(glucose) if glucose.is_empty() => {
+                    log::warn!("Juggluco returned no glucose data");
+                }
                 Result::Ok(glucose) => {
-                    log::info!("Glucose: ${}", glucose.first().unwrap().sgv);
+                    log::info!("Glucose: {}", glucose[0].sgv);
                     glucose_history = glucose;
                 } 
                 Result::Err(error) => {
