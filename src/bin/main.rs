@@ -1,6 +1,6 @@
 use std::{thread, time::{Duration, Instant}};
 
-use anyhow::{Ok, Result, anyhow};
+use anyhow::{Result, anyhow};
 use embedded_graphics::{image::{Image, ImageRaw}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::FONT_10X20}, pixelcolor::{BinaryColor, Rgb565}, prelude::*, primitives::{Polyline, PrimitiveStyle}, text::{Alignment, Baseline, Text, TextStyle, TextStyleBuilder}};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
@@ -15,7 +15,8 @@ use esp_idf_svc::{
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
 };
-use mini_mac::{glucose::{sync_glucose::{GlucoseDatas, fetch_glucose}}, market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock}, network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{icons, sync_weather::{CurrentWeather, get_weather_icon}}};
+use std::time::{SystemTime, UNIX_EPOCH};
+use mini_mac::{glucose::sync_glucose::{GlucoseDatas, fetch_glucose}, market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock}, network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{icons, sync_weather::{CurrentWeather, get_weather_icon}}};
 use mini_mac::time::sync_time;
 use mini_mac::weather::sync_weather::fetch_weather;
 use ssd1306::{
@@ -210,10 +211,17 @@ fn draw_glucose(
         .clear(BinaryColor::Off)
         .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
 
+    let now = SystemTime::now();
+    let duration = now.duration_since(UNIX_EPOCH)?;
+    let now_ms = duration.as_millis();
+
     let current_sugar = history.first();
     let message = match current_sugar {
-        Some(sugar) => format!("Glucose: {}", sugar.sgv),
         None => "NO DATA".to_string(),
+        Some(sugar) if sugar.age_minutes(now_ms) >= 10 => {
+            format!("{} OLD", sugar.sgv)
+        }
+        Some(sugar) => format!("{} mg/dL", sugar.sgv),
     };
 
     Text::with_text_style(
@@ -297,6 +305,8 @@ fn main() -> Result<()> {
             log::warn!("Failed to fetch glucose data : {error}");
         }
     }
+    const GLUCOSE_REFRESH_INTERVAL: Duration = Duration::from_mins(1);
+    let mut glucose_refresh = Instant::now();
 
     sync_time::sync_ntp()?;
     let (mut h, mut m, mut s) = sync_time::get_local_time(geo.offset);
@@ -344,7 +354,10 @@ fn main() -> Result<()> {
                 }
                 log::info!("QCOM price: ${price:.0}");
             }
+            last_fetch = Instant::now();
+        }
 
+        if glucose_refresh.elapsed() >= GLUCOSE_REFRESH_INTERVAL {
             match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
                 Result::Ok(glucose) if glucose.is_empty() => {
                     log::warn!("Juggluco returned no glucose data");
@@ -357,8 +370,7 @@ fn main() -> Result<()> {
                     log::warn!("Failed to fetch glucose data : {error}");
                 }
             }
-            
-            last_fetch = Instant::now();
+            glucose_refresh = Instant::now();
         }
 
         match current_screen {
