@@ -243,6 +243,7 @@ fn main() -> Result<()> {
 
     const MAX_HISTORY: usize = 30;
     const REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
+    const SCREEN_CHANGE_INTERVAL: Duration = Duration::from_secs(20);
     let mut btc_history: Vec<f32> = vec![fetch_btc_price()?];
     let mut last_fetch = Instant::now();
     log::info!("BTC price: ${:.0}", btc_history[0]);
@@ -263,11 +264,17 @@ fn main() -> Result<()> {
 
     let mut current_screen = Screen::Clock;
 
+    let mut rotation_clock = Instant::now();
+
     loop {
         let is_touched = touch.is_high();
 
         if is_touched && !was_touched {
             current_screen = current_screen.next();
+            rotation_clock = Instant::now();
+        } else if rotation_clock.elapsed() >= SCREEN_CHANGE_INTERVAL {
+            current_screen = current_screen.next();
+            rotation_clock = Instant::now();
         }
         was_touched = is_touched;
         
