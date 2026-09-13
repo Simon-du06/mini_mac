@@ -15,7 +15,7 @@ use esp_idf_svc::{
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
 };
-use mini_mac::{market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock}, network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{icons, sync_weather::{CurrentWeather, get_weather_icon}}};
+use mini_mac::{glucose::{sync_glucose::GlucoseDatas, sync_glucose::fetch_glucose}, market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock}, network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{icons, sync_weather::{CurrentWeather, get_weather_icon}}};
 use mini_mac::time::sync_time;
 use mini_mac::weather::sync_weather::fetch_weather;
 use ssd1306::{
@@ -48,6 +48,7 @@ enum Screen {
     Weather,
     Crypto,
     Market,
+    Glucose,
 }
 
 impl Screen {
@@ -56,7 +57,8 @@ impl Screen {
             Screen::Clock => Screen::Weather,
             Screen::Weather => Screen::Crypto,
             Screen::Crypto => Screen::Market,
-            Screen::Market  => Screen::Clock,
+            Screen::Market  => Screen::Glucose,
+            Screen::Glucose => Screen::Clock,
         }
     }
 }
@@ -134,7 +136,7 @@ fn draw_weather(
     .draw(display)
     .map_err(|err| anyhow!("Failed to draw city: {err:?}"))?;
     Text::with_text_style(
-        &format!("{:.1}°C", weather.temperature_2m),
+        &format!("{:.1} C", weather.temperature_2m),
         Point::new(128, 32),
         style,  CENTER_RIGHT_TEXT_STYLE,
     )
@@ -199,6 +201,30 @@ fn draw_market(
     Ok(())
 }
 
+fn draw_glucose(
+    display: &mut Display,
+    history: &[GlucoseDatas],
+    style: MonoTextStyle<BinaryColor>
+) -> Result<()> {
+    display
+        .clear(BinaryColor::Off)
+        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
+
+    let current_sugar = *&history.first().unwrap().sgv;
+    Text::with_text_style(
+        &format!("Glucose {current_sugar}"),
+        Point::new(64, 12),
+        style, CENTER_MIDDLE_TEXT_STYLE,
+    )
+    .draw(display)
+    .map_err(|err| anyhow!("Failed to draw glucose: {err:?}"))?;
+
+    display
+        .flush()
+        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
+    Ok(())
+}
+
 fn init_wifi(
     modem: Modem,
     sys_loop: EspSystemEventLoop,
@@ -250,6 +276,11 @@ fn main() -> Result<()> {
 
     let mut stock_history: Vec<f32> = vec![fetch_stock("QCOM")?];
     log::info!("QCOM price: ${:.0}", stock_history[0]);
+
+    const PROXY_IP: u8 = 67;
+    const GLUCOSE_BROADCAST: u16 = 17580;
+    let mut glucose_history: Vec<GlucoseDatas> = fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST)?;
+    log::info!("Glucose: ${}", glucose_history[0].sgv);
 
     sync_time::sync_ntp()?;
     let (mut h, mut m, mut s) = sync_time::get_local_time(geo.offset);
@@ -313,6 +344,9 @@ fn main() -> Result<()> {
             }
             Screen::Market => {
                 draw_market(&mut display, "QCOM", &stock_history, style)?;
+            }
+            Screen::Glucose => {
+                draw_glucose(&mut display, &glucose_history, style)?;
             }
         }
 
