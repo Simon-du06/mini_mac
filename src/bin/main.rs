@@ -15,7 +15,7 @@ use esp_idf_svc::{
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
 };
-use mini_mac::{glucose::{sync_glucose::GlucoseDatas, sync_glucose::fetch_glucose}, market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock}, network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{icons, sync_weather::{CurrentWeather, get_weather_icon}}};
+use mini_mac::{glucose::{sync_glucose::{GlucoseDatas, fetch_glucose}}, market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock}, network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{icons, sync_weather::{CurrentWeather, get_weather_icon}}};
 use mini_mac::time::sync_time;
 use mini_mac::weather::sync_weather::fetch_weather;
 use ssd1306::{
@@ -279,8 +279,16 @@ fn main() -> Result<()> {
 
     const PROXY_IP: u8 = 67;
     const GLUCOSE_BROADCAST: u16 = 17580;
-    let mut glucose_history: Vec<GlucoseDatas> = fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST)?;
-    log::info!("Glucose: ${}", glucose_history[0].sgv);
+    let mut glucose_history: Vec<GlucoseDatas> = vec![];
+    match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
+        Result::Ok(glucose) => {
+            log::info!("Glucose: ${}", glucose.first().unwrap().sgv);
+            glucose_history = glucose;
+        } 
+        Result::Err(error) => {
+            log::warn!("Failed to fetch glucose data : {error}");
+        }
+    }
 
     sync_time::sync_ntp()?;
     let (mut h, mut m, mut s) = sync_time::get_local_time(geo.offset);
@@ -328,6 +336,17 @@ fn main() -> Result<()> {
                 }
                 log::info!("QCOM price: ${price:.0}");
             }
+
+            match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
+                Result::Ok(glucose) => {
+                    log::info!("Glucose: ${}", glucose.first().unwrap().sgv);
+                    glucose_history = glucose;
+                } 
+                Result::Err(error) => {
+                    log::warn!("Failed to fetch glucose data : {error}");
+                }
+            }
+            
             last_fetch = Instant::now();
         }
 
