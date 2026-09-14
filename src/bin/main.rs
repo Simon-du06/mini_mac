@@ -323,7 +323,7 @@ fn main() -> Result<()> {
     let mut stock_history: Vec<f32> = vec![fetch_stock("QCOM")?];
     log::info!("QCOM price: ${:.0}", stock_history[0]);
 
-    const PROXY_IP: u8 = 67;
+    const PROXY_IP: u8 = 34;
     const GLUCOSE_BROADCAST: u16 = 17580;
     let mut glucose_history: Vec<GlucoseDatas> = vec![];
     match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
