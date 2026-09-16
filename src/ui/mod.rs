@@ -14,6 +14,7 @@ pub enum Screen {
     Weather,
     Crypto,
     Market,
+    Glucose,
 }
 
 impl Screen {
@@ -22,7 +23,8 @@ impl Screen {
             Screen::Clock => Screen::Weather,
             Screen::Weather => Screen::Crypto,
             Screen::Crypto => Screen::Market,
-            Screen::Market => Screen::Clock,
+            Screen::Market => Screen::Glucose,
+            Screen::Glucose => Screen::Clock,
         }
     }
 }

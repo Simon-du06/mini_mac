@@ -1,105 +1,46 @@
-use std::{thread, time::{Duration, Instant}};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
-use anyhow::{Result, anyhow};
-use embedded_graphics::{image::{Image, ImageRaw}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::FONT_10X20}, pixelcolor::{BinaryColor, Rgb565}, prelude::*, primitives::{Polyline, PrimitiveStyle}, text::{Alignment, Baseline, Text, TextStyle, TextStyleBuilder}};
+use anyhow::Result;
+use embedded_graphics::{
+    mono_font::{ascii::FONT_10X20, MonoTextStyleBuilder},
+    pixelcolor::BinaryColor,
+};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{
-        gpio::{Gpio6, Gpio7, PinDriver},
-        i2c::{I2C0, I2cDriver, config::Config as I2cConfig},
+        gpio::PinDriver,
         modem::Modem,
         peripherals::Peripherals,
-        prelude::Hertz,
     },
     log::EspLogger,
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
 };
-use mini_mac::time::sync_time;
-use ssd1306::{
-    mode::{BufferedGraphicsMode, DisplayConfig},
-    prelude::{DisplaySize128x64, DisplayRotation, I2CInterface},
-    I2CDisplayInterface, Ssd1306,
+
+use mini_mac::{
+    glucose::sync_glucose::{fetch_glucose, GlucoseDatas},
+    market::{
+        sync_crypto::fetch_btc_price,
+        sync_market::fetch_stock,
+    },
+    network::{
+        connect_wifi,
+        geo::fetch_geo_info,
+    },
+    time::sync_time,
+    ui::{
+        display::{init_display, show_boot_image},
+        draw_clock,
+        draw_glucose,
+        draw_market,
+        draw_weather,
+        Screen,
+    },
+    weather::sync_weather::fetch_weather,
 };
-use tinybmp::Bmp;
-
-use mini_mac::ui::{
-    draw_clock,
-    draw_glucose,
-    draw_market,
-    draw_weather,
-    display::{init_display, show_boot_image},
-    Screen,
-};
-
-fn draw_glucose(
-    display: &mut Display,
-    history: &[GlucoseDatas],
-    style: MonoTextStyle<BinaryColor>
-) -> Result<()> {
-    display
-        .clear(BinaryColor::Off)
-        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
-
-    let now = SystemTime::now();
-    let duration = now.duration_since(UNIX_EPOCH)?;
-    let now_ms = duration.as_millis();
-
-    let current_sugar = history.first();
-    let message = match current_sugar {
-        None => "NO DATA".to_string(),
-        Some(sugar) if sugar.age_minutes(now_ms) >= 10 => {
-            format!("{} OLD", sugar.sgv)
-        }
-        Some(sugar) => format!("{} mg/dL", sugar.sgv),
-    };
-
-    Text::with_text_style(
-        &message,
-        Point::new(64, 12),
-        style, CENTER_MIDDLE_TEXT_STYLE,
-    )
-    .draw(display)
-    .map_err(|err| anyhow!("Failed to draw glucose: {err:?}"))?;
-
-    let glucose_values: Vec<f32> = history
-        .iter()
-        .rev()
-        .map(|x| x.sgv as f32)
-        .collect();
-
-    if glucose_values.len() > 3 {
-        let min = glucose_values.iter().cloned().fold(f32::INFINITY, f32::min);
-        let max = glucose_values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let range = (max - min).max(1.0);
-
-        const GRAPH_LEFT: i32 = 4;
-        const GRAPH_RIGHT: i32 = 124;
-        const GRAPH_TOP: i32 = 26;
-        const GRAPH_HEIGHT: i32 = 32;
-
-        let span = (GRAPH_RIGHT - GRAPH_LEFT) as f32 / (history.len() - 1) as f32;
-        let points: Vec<Point> = glucose_values
-            .iter()
-            .enumerate()
-            .map(|(i, &glucose)| {
-                let x = GRAPH_LEFT + (i as f32 * span) as i32;
-                let y = GRAPH_TOP + GRAPH_HEIGHT - ((glucose - min) / range * GRAPH_HEIGHT as f32) as i32;
-                Point::new(x, y)
-            })
-            .collect();
-
-        Polyline::new(&points)
-            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-            .draw(display)
-            .map_err(|err| anyhow!("Failed to draw glucose trend: {err:?}"))?;
-    }
-
-    display
-        .flush()
-        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
-    Ok(())
-}
 
 fn init_wifi(
     modem: Modem,
@@ -157,14 +98,14 @@ fn main() -> Result<()> {
     const GLUCOSE_BROADCAST: u16 = 17580;
     let mut glucose_history: Vec<GlucoseDatas> = vec![];
     match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
-        Result::Ok(glucose) if glucose.is_empty() => {
+        Ok(glucose) if glucose.is_empty() => {
             log::warn!("Juggluco returned no glucose data");
         }
-        Result::Ok(glucose) => {
+        Ok(glucose) => {
             log::info!("Glucose: {}", glucose[0].sgv);
             glucose_history = glucose;
         }
-        Result::Err(error) => {
+        Err(error) => {
             log::warn!("Failed to fetch glucose data : {error}");
         }
     }
@@ -199,18 +140,18 @@ fn main() -> Result<()> {
         was_touched = is_touched;
         
         if last_fetch.elapsed() >= REFRESH_INTERVAL {
-            if let Result::Ok(price) = fetch_btc_price() {
+            if let Ok(price) = fetch_btc_price() {
                 btc_history.push(price);
                 if btc_history.len() > MAX_HISTORY {
                     btc_history.remove(0);
                 }
                 log::info!("BTC price: ${price:.0}");
             }
-            if let Result::Ok(weather_up) = fetch_weather(geo.lat, geo.lon) {
+            if let Ok(weather_up) = fetch_weather(geo.lat, geo.lon) {
                 weather = weather_up;
                 log::info!("Weather: {}°C, code {}", weather.temperature_2m,weather.weathercode);
             }
-            if let Result::Ok(price) = fetch_stock("QCOM") {
+            if let Ok(price) = fetch_stock("QCOM") {
                 stock_history.push(price);
                 if stock_history.len() > MAX_HISTORY {
                     stock_history.remove(0);
@@ -222,14 +163,14 @@ fn main() -> Result<()> {
 
         if glucose_refresh.elapsed() >= GLUCOSE_REFRESH_INTERVAL {
             match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
-                Result::Ok(glucose) if glucose.is_empty() => {
+                Ok(glucose) if glucose.is_empty() => {
                     log::warn!("Juggluco returned no glucose data");
                 }
-                Result::Ok(glucose) => {
+                Ok(glucose) => {
                     log::info!("Glucose: {}", glucose[0].sgv);
                     glucose_history = glucose;
                 } 
-                Result::Err(error) => {
+                Err(error) => {
                     log::warn!("Failed to fetch glucose data : {error}");
                 }
             }

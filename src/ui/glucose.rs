@@ -10,6 +10,10 @@ use embedded_graphics::{
 
 use super::display::{Display, CENTER_MIDDLE_TEXT_STYLE};
 
+use crate::{
+    glucose::sync_glucose::GlucoseDatas,
+};
+
 pub fn draw_glucose(
     display: &mut Display,
     history: &[GlucoseDatas],
