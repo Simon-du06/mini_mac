@@ -1,9 +1,10 @@
 use anyhow::{Result, anyhow};
 use embedded_graphics::{
     image::Image,
-    pixelcolor::Rgb565,
+    mono_font::MonoTextStyle,
+    pixelcolor::{BinaryColor, Rgb565},
     prelude::*,
-    text::{Alignment, Baseline, TextStyle, TextStyleBuilder},
+    text::{Alignment, Baseline, Text, TextStyle, TextStyleBuilder},
 };
 use esp_idf_svc::hal::{
     gpio::{Gpio6, Gpio7},
@@ -54,6 +55,32 @@ pub fn show_boot_image(display: &mut Display) -> Result<()> {
     image
         .draw(&mut display.color_converted())
         .map_err(|err| anyhow!("Failed to draw boot bitmap: {err:?}"))?;
+    display
+        .flush()
+        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
+
+    Ok(())
+}
+
+pub fn draw_no_data(
+    display: &mut Display,
+    label: &str,
+    style: MonoTextStyle<BinaryColor>,
+) -> Result<()> {
+    display
+        .clear(BinaryColor::Off)
+        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
+    Text::with_text_style(label, Point::new(64, 20), style, CENTER_MIDDLE_TEXT_STYLE)
+        .draw(display)
+        .map_err(|err| anyhow!("Failed to draw no data message: {err:?}"))?;
+    Text::with_text_style(
+        "NO DATA",
+        Point::new(64, 44),
+        style,
+        CENTER_MIDDLE_TEXT_STYLE,
+    )
+    .draw(display)
+    .map_err(|err| anyhow!("Failed to draw no data message: {err:?}"))?;
     display
         .flush()
         .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;

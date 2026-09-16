@@ -1,13 +1,17 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use esp_idf_svc::sntp::{EspSntp, SyncStatus};
 
 pub fn sync_ntp() -> Result<()> {
     let sntp = EspSntp::new_default()?;
+    let started_at = Instant::now();
 
     while sntp.get_sync_status() != SyncStatus::Completed {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        if started_at.elapsed() >= Duration::from_secs(10) {
+            return Err(anyhow!("NTP synchronization timed out"));
+        }
+        std::thread::sleep(Duration::from_secs(1));
     }
     Ok(())
 }

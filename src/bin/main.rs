@@ -19,15 +19,22 @@ use esp_idf_svc::{
 use mini_mac::{
     glucose::sync_glucose::{GlucoseDatas, fetch_glucose},
     market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock},
-    network::{connect_wifi, geo::fetch_geo_info},
+    network::{
+        connect_wifi,
+        geo::{GeoInfo, fetch_geo_info},
+    },
     time::sync_time,
     ui::{
         Screen,
-        display::{init_display, show_boot_image},
+        display::{draw_no_data, init_display, show_boot_image},
         draw_clock, draw_glucose, draw_market, draw_weather,
     },
-    weather::sync_weather::fetch_weather,
+    weather::sync_weather::{CurrentWeather, fetch_weather},
 };
+
+const MAX_HISTORY: usize = 30;
+const PROXY_IP: u8 = 34;
+const GLUCOSE_BROADCAST: u16 = 17580;
 
 fn init_wifi(
     modem: Modem,
@@ -64,46 +71,31 @@ fn main() -> Result<()> {
 
     let _wifi = init_wifi(peripherals.modem, sys_loop, nvs)?;
 
-    let geo = fetch_geo_info()?;
-    log::info!("City: {}, Timezone offset: {}s", geo.city, geo.offset);
+    let mut geo = None;
+    refresh_geo(&mut geo);
 
-    let mut weather = fetch_weather(geo.lat, geo.lon)?;
-    log::info!(
-        "Weather: {}°C, code {}",
-        weather.temperature_2m,
-        weather.weathercode
-    );
+    let mut weather = None;
+    refresh_weather(geo.as_ref(), &mut weather);
 
-    const MAX_HISTORY: usize = 30;
     const REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
     const SCREEN_CHANGE_INTERVAL: Duration = Duration::from_secs(20);
-    let mut btc_history: Vec<f32> = vec![fetch_btc_price()?];
+    let mut btc_history: Vec<f32> = vec![];
+    refresh_btc(&mut btc_history);
     let mut last_fetch = Instant::now();
-    log::info!("BTC price: ${:.0}", btc_history[0]);
 
-    let mut stock_history: Vec<f32> = vec![fetch_stock("QCOM")?];
-    log::info!("QCOM price: ${:.0}", stock_history[0]);
+    let mut stock_history: Vec<f32> = vec![];
+    refresh_stock(&mut stock_history);
 
-    const PROXY_IP: u8 = 34;
-    const GLUCOSE_BROADCAST: u16 = 17580;
     let mut glucose_history: Vec<GlucoseDatas> = vec![];
-    match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
-        Ok(glucose) if glucose.is_empty() => {
-            log::warn!("Juggluco returned no glucose data");
-        }
-        Ok(glucose) => {
-            log::info!("Glucose: {}", glucose[0].sgv);
-            glucose_history = glucose;
-        }
-        Err(error) => {
-            log::warn!("Failed to fetch glucose data : {error}");
-        }
-    }
-    const GLUCOSE_REFRESH_INTERVAL: Duration = Duration::from_mins(1);
+    refresh_glucose(&mut glucose_history);
+    const GLUCOSE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
     let mut glucose_refresh = Instant::now();
 
-    sync_time::sync_ntp()?;
-    let (mut h, mut m, mut s) = sync_time::get_local_time(geo.offset);
+    if let Err(error) = sync_time::sync_ntp() {
+        log::warn!("Failed to sync time: {error}");
+    }
+    let timezone_offset = geo.as_ref().map_or(0, |geo| geo.offset);
+    let (mut h, mut m, mut s) = sync_time::get_local_time(timezone_offset);
     log::info!("Local time: {h:02}:{m:02}:{s:02}");
 
     let style = MonoTextStyleBuilder::new()
@@ -120,76 +112,37 @@ fn main() -> Result<()> {
     loop {
         let is_touched = touch.is_high();
 
-        if is_touched && !was_touched {
-            current_screen = current_screen.next();
-            rotation_clock = Instant::now();
-        } else if rotation_clock.elapsed() >= SCREEN_CHANGE_INTERVAL {
+        if (is_touched && !was_touched) || rotation_clock.elapsed() >= SCREEN_CHANGE_INTERVAL {
             current_screen = current_screen.next();
             rotation_clock = Instant::now();
         }
         was_touched = is_touched;
 
         if last_fetch.elapsed() >= REFRESH_INTERVAL {
-            match fetch_btc_price() {
-                Ok(price) => {
-                    btc_history.push(price);
-                    if btc_history.len() > MAX_HISTORY {
-                        btc_history.remove(0);
-                    }
-                    log::info!("BTC price: ${price:.0}");
-                }
-                Err(error) => {
-                    log::warn!("Failed to fetch BTC price: {error}");
-                }
-            }
-            match fetch_weather(geo.lat, geo.lon) {
-                Ok(weather_up) => {
-                    weather = weather_up;
-                    log::info!("Weather: {}°C, code {}", weather.temperature_2m,weather.weathercode);
-                }
-                Err(error) => {
-                    log::warn!("Failed to fetch weather: {error}");
-                }
-            }
-            match fetch_stock("QCOM") {
-                Ok(price) => {
-                    stock_history.push(price);
-                    if stock_history.len() > MAX_HISTORY {
-                        stock_history.remove(0);
-                    }
-                    log::info!("QCOM price: ${price:.0}");
-                }
-                Err(error) => {
-                    log::warn!("Failed to fetch stock: {error}");
-                }
-            }
+            refresh_geo(&mut geo);
+            refresh_btc(&mut btc_history);
+            refresh_weather(geo.as_ref(), &mut weather);
+            refresh_stock(&mut stock_history);
             last_fetch = Instant::now();
         }
 
         if glucose_refresh.elapsed() >= GLUCOSE_REFRESH_INTERVAL {
-            match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
-                Ok(glucose) if glucose.is_empty() => {
-                    log::warn!("Juggluco returned no glucose data");
-                }
-                Ok(glucose) => {
-                    log::info!("Glucose: {}", glucose[0].sgv);
-                    glucose_history = glucose;
-                }
-                Err(error) => {
-                    log::warn!("Failed to fetch glucose data : {error}");
-                }
-            }
+            refresh_glucose(&mut glucose_history);
             glucose_refresh = Instant::now();
         }
 
         match current_screen {
             Screen::Clock => {
                 draw_clock(&mut display, h, m, s, style)?;
-                (h, m, s) = sync_time::get_local_time(geo.offset);
+                let timezone_offset = geo.as_ref().map_or(0, |geo| geo.offset);
+                (h, m, s) = sync_time::get_local_time(timezone_offset);
             }
-            Screen::Weather => {
-                draw_weather(&mut display, &weather, &geo, style)?;
-            }
+            Screen::Weather => match (&weather, &geo) {
+                (Some(weather), Some(geo)) => {
+                    draw_weather(&mut display, weather, geo, style)?;
+                }
+                _ => draw_no_data(&mut display, "WEATHER", style)?,
+            },
             Screen::Crypto => {
                 draw_market(&mut display, "BTC", &btc_history, style)?;
             }
@@ -202,5 +155,83 @@ fn main() -> Result<()> {
         }
 
         thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn refresh_btc(btc_history: &mut Vec<f32>) {
+    match fetch_btc_price() {
+        Ok(price) => {
+            btc_history.push(price);
+            if btc_history.len() > MAX_HISTORY {
+                btc_history.remove(0);
+            }
+            log::info!("BTC price: ${price:.0}");
+        }
+        Err(error) => {
+            log::warn!("Failed to fetch BTC price: {error}");
+        }
+    }
+}
+
+fn refresh_stock(stock_history: &mut Vec<f32>) {
+    match fetch_stock("QCOM") {
+        Ok(price) => {
+            stock_history.push(price);
+            if stock_history.len() > MAX_HISTORY {
+                stock_history.remove(0);
+            }
+            log::info!("QCOM price: ${price:.0}");
+        }
+        Err(error) => {
+            log::warn!("Failed to fetch stock: {error}");
+        }
+    }
+}
+
+fn refresh_geo(geo: &mut Option<GeoInfo>) {
+    match fetch_geo_info() {
+        Ok(geo_up) => {
+            log::info!("City: {}, Timezone offset: {}s", geo_up.city, geo_up.offset);
+            *geo = Some(geo_up);
+        }
+        Err(error) => {
+            log::warn!("Failed to fetch location: {error}");
+        }
+    }
+}
+
+fn refresh_weather(geo: Option<&GeoInfo>, weather: &mut Option<CurrentWeather>) {
+    let Some(geo) = geo else {
+        log::warn!("Cannot fetch weather without location data");
+        return;
+    };
+
+    match fetch_weather(geo.lat, geo.lon) {
+        Ok(weather_up) => {
+            log::info!(
+                "Weather: {}°C, code {}",
+                weather_up.temperature_2m,
+                weather_up.weathercode
+            );
+            *weather = Some(weather_up);
+        }
+        Err(error) => {
+            log::warn!("Failed to fetch weather: {error}");
+        }
+    }
+}
+
+fn refresh_glucose(glucose_history: &mut Vec<GlucoseDatas>) {
+    match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
+        Ok(glucose) if glucose.is_empty() => {
+            log::warn!("Juggluco returned no glucose data");
+        }
+        Ok(glucose) => {
+            log::info!("Glucose: {}", glucose[0].sgv);
+            *glucose_history = glucose;
+        }
+        Err(error) => {
+            log::warn!("Failed to fetch glucose data : {error}");
+        }
     }
 }

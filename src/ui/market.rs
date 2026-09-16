@@ -7,7 +7,7 @@ use embedded_graphics::{
     text::Text,
 };
 
-use super::display::{CENTER_MIDDLE_TEXT_STYLE, Display};
+use super::display::{CENTER_MIDDLE_TEXT_STYLE, Display, draw_no_data};
 
 pub fn draw_market(
     display: &mut Display,
@@ -15,11 +15,15 @@ pub fn draw_market(
     history: &[f32],
     style: MonoTextStyle<BinaryColor>,
 ) -> Result<()> {
+    if history.is_empty() {
+        return draw_no_data(display, symbol, style);
+    }
+
     display
         .clear(BinaryColor::Off)
         .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
 
-    let current_price = *history.last().unwrap_or(&0.0);
+    let current_price = history.last().copied().unwrap_or_default();
     Text::with_text_style(
         &format!("{symbol} ${current_price:.2}"),
         Point::new(64, 12),
