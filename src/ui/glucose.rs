@@ -1,5 +1,4 @@
-use anyhow::{anyhow, Result};
-use std::time::{SystemTime, UNIX_EPOCH};
+use anyhow::{Result, anyhow};
 use embedded_graphics::{
     mono_font::MonoTextStyle,
     pixelcolor::BinaryColor,
@@ -7,17 +6,16 @@ use embedded_graphics::{
     primitives::{Polyline, PrimitiveStyle},
     text::Text,
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::display::{Display, CENTER_MIDDLE_TEXT_STYLE};
+use super::display::{CENTER_MIDDLE_TEXT_STYLE, Display};
 
-use crate::{
-    glucose::sync_glucose::GlucoseDatas,
-};
+use crate::glucose::sync_glucose::GlucoseDatas;
 
 pub fn draw_glucose(
     display: &mut Display,
     history: &[GlucoseDatas],
-    style: MonoTextStyle<BinaryColor>
+    style: MonoTextStyle<BinaryColor>,
 ) -> Result<()> {
     display
         .clear(BinaryColor::Off)
@@ -66,7 +64,8 @@ pub fn draw_glucose(
             .enumerate()
             .map(|(i, &glucose)| {
                 let x = GRAPH_LEFT + (i as f32 * span) as i32;
-                let y = GRAPH_TOP + GRAPH_HEIGHT - ((glucose - min) / range * GRAPH_HEIGHT as f32) as i32;
+                let y = GRAPH_TOP + GRAPH_HEIGHT
+                    - ((glucose - min) / range * GRAPH_HEIGHT as f32) as i32;
                 Point::new(x, y)
             })
             .collect();

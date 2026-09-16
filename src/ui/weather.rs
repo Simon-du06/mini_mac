@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use embedded_graphics::{
     image::{Image, ImageRaw},
     mono_font::MonoTextStyle,
@@ -11,11 +11,11 @@ use crate::{
     network::geo::GeoInfo,
     weather::{
         icons,
-        sync_weather::{get_weather_icon, CurrentWeather},
+        sync_weather::{CurrentWeather, get_weather_icon},
     },
 };
 
-use super::display::{Display, CENTER_RIGHT_TEXT_STYLE};
+use super::display::{CENTER_RIGHT_TEXT_STYLE, Display};
 
 pub fn draw_weather(
     display: &mut Display,

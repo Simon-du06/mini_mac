@@ -1,12 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use embedded_graphics::{
-    mono_font::MonoTextStyle,
-    pixelcolor::BinaryColor,
-    prelude::*,
-    text::Text,
+    mono_font::MonoTextStyle, pixelcolor::BinaryColor, prelude::*, text::Text,
 };
 
-use super::display::{Display, CENTER_MIDDLE_TEXT_STYLE};
+use super::display::{CENTER_MIDDLE_TEXT_STYLE, Display};
 
 pub fn draw_clock(
     display: &mut Display,

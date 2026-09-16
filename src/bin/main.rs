@@ -5,39 +5,26 @@ use std::{
 
 use anyhow::Result;
 use embedded_graphics::{
-    mono_font::{ascii::FONT_10X20, MonoTextStyleBuilder},
+    mono_font::{MonoTextStyleBuilder, ascii::FONT_10X20},
     pixelcolor::BinaryColor,
 };
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
-    hal::{
-        gpio::PinDriver,
-        modem::Modem,
-        peripherals::Peripherals,
-    },
+    hal::{gpio::PinDriver, modem::Modem, peripherals::Peripherals},
     log::EspLogger,
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
 };
 
 use mini_mac::{
-    glucose::sync_glucose::{fetch_glucose, GlucoseDatas},
-    market::{
-        sync_crypto::fetch_btc_price,
-        sync_market::fetch_stock,
-    },
-    network::{
-        connect_wifi,
-        geo::fetch_geo_info,
-    },
+    glucose::sync_glucose::{GlucoseDatas, fetch_glucose},
+    market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock},
+    network::{connect_wifi, geo::fetch_geo_info},
     time::sync_time,
     ui::{
-        display::{init_display, show_boot_image},
-        draw_clock,
-        draw_glucose,
-        draw_market,
-        draw_weather,
         Screen,
+        display::{init_display, show_boot_image},
+        draw_clock, draw_glucose, draw_market, draw_weather,
     },
     weather::sync_weather::fetch_weather,
 };
@@ -47,8 +34,7 @@ fn init_wifi(
     sys_loop: EspSystemEventLoop,
     nvs: EspDefaultNvsPartition,
 ) -> Result<BlockingWifi<EspWifi<'static>>> {
-    let mut wifi =
-        BlockingWifi::wrap(EspWifi::new(modem, sys_loop.clone(), Some(nvs))?, sys_loop)?;
+    let mut wifi = BlockingWifi::wrap(EspWifi::new(modem, sys_loop.clone(), Some(nvs))?, sys_loop)?;
     connect_wifi::connect_wifi(&mut wifi)?;
 
     let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
@@ -69,7 +55,11 @@ fn main() -> Result<()> {
 
     let touch = PinDriver::input(peripherals.pins.gpio4)?;
 
-    let mut display = init_display(peripherals.i2c0, peripherals.pins.gpio6, peripherals.pins.gpio7)?;
+    let mut display = init_display(
+        peripherals.i2c0,
+        peripherals.pins.gpio6,
+        peripherals.pins.gpio7,
+    )?;
     show_boot_image(&mut display)?;
 
     let _wifi = init_wifi(peripherals.modem, sys_loop, nvs)?;
@@ -116,10 +106,10 @@ fn main() -> Result<()> {
     let (mut h, mut m, mut s) = sync_time::get_local_time(geo.offset);
     log::info!("Local time: {h:02}:{m:02}:{s:02}");
 
-    let style =MonoTextStyleBuilder::new()
-    .font(&FONT_10X20)
-    .text_color(BinaryColor::On)
-    .build();
+    let style = MonoTextStyleBuilder::new()
+        .font(&FONT_10X20)
+        .text_color(BinaryColor::On)
+        .build();
 
     let mut was_touched = false;
 
@@ -138,7 +128,7 @@ fn main() -> Result<()> {
             rotation_clock = Instant::now();
         }
         was_touched = is_touched;
-        
+
         if last_fetch.elapsed() >= REFRESH_INTERVAL {
             if let Ok(price) = fetch_btc_price() {
                 btc_history.push(price);
@@ -169,7 +159,7 @@ fn main() -> Result<()> {
                 Ok(glucose) => {
                     log::info!("Glucose: {}", glucose[0].sgv);
                     glucose_history = glucose;
-                } 
+                }
                 Err(error) => {
                     log::warn!("Failed to fetch glucose data : {error}");
                 }

@@ -1,4 +1,5 @@
-use anyhow::{anyhow, Result}; use embedded_graphics::{
+use anyhow::{Result, anyhow};
+use embedded_graphics::{
     image::Image,
     pixelcolor::Rgb565,
     prelude::*,

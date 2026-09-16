@@ -5,7 +5,7 @@ use anyhow::Result;
 #[derive(serde::Deserialize)]
 pub struct GlucoseDatas {
     pub date: u64,
-    pub sgv: u16, 
+    pub sgv: u16,
     pub delta: Option<f32>,
     pub direction: String,
     pub noise: Option<i8>,
@@ -14,7 +14,7 @@ pub struct GlucoseDatas {
 
 impl GlucoseDatas {
     pub fn age_minutes(&self, now_ms: u128) -> u128 {
-        now_ms.saturating_sub(u128::from(self.date)) / 60_000 
+        now_ms.saturating_sub(u128::from(self.date)) / 60_000
     }
 }
 
