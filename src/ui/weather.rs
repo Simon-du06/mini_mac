@@ -36,7 +36,7 @@ pub fn draw_weather(
         .draw(&mut display.color_converted())
         .map_err(|err| anyhow!("Failed to draw icon bitmap: {err:?}"))?;
     Text::with_text_style(
-        &format!("{}", geo.city),
+        geo.city.as_str(),
         Point::new(128, 54),
         style,
         CENTER_RIGHT_TEXT_STYLE,
