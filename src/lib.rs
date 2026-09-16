@@ -3,3 +3,5 @@ pub mod network;
 pub mod time;
 pub mod ui;
 pub mod weather;
+pub mod glucose;
+pub mod solarman;
