@@ -130,23 +130,38 @@ fn main() -> Result<()> {
         was_touched = is_touched;
 
         if last_fetch.elapsed() >= REFRESH_INTERVAL {
-            if let Ok(price) = fetch_btc_price() {
-                btc_history.push(price);
-                if btc_history.len() > MAX_HISTORY {
-                    btc_history.remove(0);
+            match fetch_btc_price() {
+                Ok(price) => {
+                    btc_history.push(price);
+                    if btc_history.len() > MAX_HISTORY {
+                        btc_history.remove(0);
+                    }
+                    log::info!("BTC price: ${price:.0}");
                 }
-                log::info!("BTC price: ${price:.0}");
-            }
-            if let Ok(weather_up) = fetch_weather(geo.lat, geo.lon) {
-                weather = weather_up;
-                log::info!("Weather: {}°C, code {}", weather.temperature_2m,weather.weathercode);
-            }
-            if let Ok(price) = fetch_stock("QCOM") {
-                stock_history.push(price);
-                if stock_history.len() > MAX_HISTORY {
-                    stock_history.remove(0);
+                Err(error) => {
+                    log::warn!("Failed to fetch BTC price: {error}");
                 }
-                log::info!("QCOM price: ${price:.0}");
+            }
+            match fetch_weather(geo.lat, geo.lon) {
+                Ok(weather_up) => {
+                    weather = weather_up;
+                    log::info!("Weather: {}°C, code {}", weather.temperature_2m,weather.weathercode);
+                }
+                Err(error) => {
+                    log::warn!("Failed to fetch weather: {error}");
+                }
+            }
+            match fetch_stock("QCOM") {
+                Ok(price) => {
+                    stock_history.push(price);
+                    if stock_history.len() > MAX_HISTORY {
+                        stock_history.remove(0);
+                    }
+                    log::info!("QCOM price: ${price:.0}");
+                }
+                Err(error) => {
+                    log::warn!("Failed to fetch stock: {error}");
+                }
             }
             last_fetch = Instant::now();
         }
