@@ -1,6 +1,6 @@
-use anyhow::{anyhow, Result};
-use embedded_svc::http::client::Client;
+use anyhow::{Result, anyhow};
 use embedded_svc::http::Method;
+use embedded_svc::http::client::Client;
 use embedded_svc::utils::io;
 use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
 use log::{error, info};

@@ -15,9 +15,7 @@ use esp_idf_svc::{
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
 };
-use mini_mac::{market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock}, network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{icons, sync_weather::{CurrentWeather, get_weather_icon}}};
 use mini_mac::time::sync_time;
-use mini_mac::weather::sync_weather::fetch_weather;
 use ssd1306::{
     mode::{BufferedGraphicsMode, DisplayConfig},
     prelude::{DisplaySize128x64, DisplayRotation, I2CInterface},
@@ -25,179 +23,14 @@ use ssd1306::{
 };
 use tinybmp::Bmp;
 
-/// Alias pour le type concret de l'écran : sans lui, chaque signature de
-/// fonction qui manipule l'écran devrait répéter ce type générique complet.
-type Display = Ssd1306<
-    I2CInterface<I2cDriver<'static>>,
-    DisplaySize128x64,
-    BufferedGraphicsMode<DisplaySize128x64>,
->;
-
-const CENTER_MIDDLE_TEXT_STYLE: TextStyle = TextStyleBuilder::new()
-    .alignment(Alignment::Center)
-    .baseline(Baseline::Middle)
-    .build();
-
-const CENTER_RIGHT_TEXT_STYLE: TextStyle = TextStyleBuilder::new()
-    .alignment(Alignment::Right)
-    .baseline(Baseline::Middle)
-    .build();
-
-enum Screen {
-    Clock,
-    Weather,
-    Crypto,
-    Market,
-}
-
-impl Screen {
-    fn next(self) -> Self {
-        match self {
-            Screen::Clock => Screen::Weather,
-            Screen::Weather => Screen::Crypto,
-            Screen::Crypto => Screen::Market,
-            Screen::Market  => Screen::Clock,
-        }
-    }
-}
-
-fn init_display(i2c0: I2C0, sda: Gpio6, scl: Gpio7) -> Result<Display> {
-    let i2c = I2cDriver::new(i2c0, sda, scl, &I2cConfig::new().baudrate(Hertz(400_000)))?;
-
-    let interface = I2CDisplayInterface::new(i2c);
-    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
-        .into_buffered_graphics_mode();
-    display
-        .init()
-        .map_err(|err| anyhow!("Failed to initialize display: {err:?}"))?;
-
-    Ok(display)
-}
-
-fn show_boot_image(display: &mut Display) -> Result<()> {
-    let bmp = Bmp::from_slice(include_bytes!("../asset/images/hello2.bmp"))
-        .map_err(|err| anyhow!("Failed to parse boot bitmap: {err:?}"))?;
-    let image: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(0, 0));
-
-    image
-        .draw(&mut display.color_converted())
-        .map_err(|err| anyhow!("Failed to draw boot bitmap: {err:?}"))?;
-    display
-        .flush()
-        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
-
-    Ok(())
-}
-
-fn draw_clock(
-    display: &mut Display,
-    h: u8, m: u8, s: u8,
-    style: MonoTextStyle<BinaryColor>,
-) -> Result<()> {
-    display
-        .clear(BinaryColor::Off)
-        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
-    Text::with_text_style(
-        &format!("{h:02}:{m:02}:{s:02}"),
-        Point::new(64, 32),
-        style,  CENTER_MIDDLE_TEXT_STYLE,
-    )
-    .draw(display)
-    .map_err(|err| anyhow!("Failed to draw clock: {err:?}"))?;
-    display
-        .flush()
-        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
-
-    Ok(())
-}
-
-fn draw_weather(
-    display: &mut Display,
-    weather: &CurrentWeather,
-    geo: &GeoInfo,
-    style: MonoTextStyle<BinaryColor>
-) -> Result<()> {
-    let raw: ImageRaw<BinaryColor> = ImageRaw::new(get_weather_icon(weather.weathercode), icons::ICON_LARGE_WIDTH);
-    let image = Image::new(&raw, Point::new(5, 5));
-
-    display
-        .clear(BinaryColor::Off)
-        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
-    image
-        .draw(&mut display.color_converted())
-        .map_err(|err| anyhow!("Failed to draw icon bitmap: {err:?}"))?;
-    Text::with_text_style(
-        &format!("{}", geo.city),
-        Point::new(128, 54),
-        style, CENTER_RIGHT_TEXT_STYLE
-    )
-    .draw(display)
-    .map_err(|err| anyhow!("Failed to draw city: {err:?}"))?;
-    Text::with_text_style(
-        &format!("{:.1}°C", weather.temperature_2m),
-        Point::new(128, 32),
-        style,  CENTER_RIGHT_TEXT_STYLE,
-    )
-    .draw(display)
-    .map_err(|err| anyhow!("Failed to draw temperature: {err:?}"))?;
-    display
-        .flush()
-        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
-    Ok(())
-}
-
-
-fn draw_market(
-    display: &mut Display,
-    symbol: &str,
-    history: &[f32],
-    style: MonoTextStyle<BinaryColor>,
-) -> Result<()> {
-    display
-        .clear(BinaryColor::Off)
-        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
-
-    let current_price = *history.last().unwrap_or(&0.0);
-    Text::with_text_style(
-        &format!("{symbol} ${current_price:.2}"),
-        Point::new(64, 12),
-        style, CENTER_MIDDLE_TEXT_STYLE,
-    )
-    .draw(display)
-    .map_err(|err| anyhow!("Failed to draw price: {err:?}"))?;
-
-    if history.len() >= 2 {
-        let min = history.iter().cloned().fold(f32::INFINITY, f32::min);
-        let max = history.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let range = (max - min).max(1.0);
-
-        const GRAPH_LEFT: i32 = 4;
-        const GRAPH_RIGHT: i32 = 124;
-        const GRAPH_TOP: i32 = 26;
-        const GRAPH_HEIGHT: i32 = 32;
-
-        let span = (GRAPH_RIGHT - GRAPH_LEFT) as f32 / (history.len() - 1) as f32;
-        let points: Vec<Point> = history
-            .iter()
-            .enumerate()
-            .map(|(i, &price)| {
-                let x = GRAPH_LEFT + (i as f32 * span) as i32;
-                let y = GRAPH_TOP + GRAPH_HEIGHT - ((price - min) / range * GRAPH_HEIGHT as f32) as i32;
-                Point::new(x, y)
-            })
-            .collect();
-
-        Polyline::new(&points)
-            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-            .draw(display)
-            .map_err(|err| anyhow!("Failed to draw price trend: {err:?}"))?;
-    }
-
-    display
-        .flush()
-        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
-    Ok(())
-}
+use mini_mac::ui::{
+    draw_clock,
+    draw_glucose,
+    draw_market,
+    draw_weather,
+    display::{init_display, show_boot_image},
+    Screen,
+};
 
 fn init_wifi(
     modem: Modem,
