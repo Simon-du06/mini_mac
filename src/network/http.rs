@@ -1,12 +1,13 @@
-use anyhow::{anyhow, Result};
-use embedded_svc::http::client::Client;
+use anyhow::{Result, anyhow};
 use embedded_svc::http::Method;
+use embedded_svc::http::client::Client;
 use embedded_svc::utils::io;
 use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
 use log::{error, info};
 
 pub fn http_get(url: &str) -> Result<String> {
     let config = Configuration {
+        timeout: Some(std::time::Duration::from_secs(7)),
         crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
         ..Default::default()
     };

@@ -1,283 +1,47 @@
-use std::{thread, time::{Duration, Instant}};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
-use anyhow::{Result, anyhow};
-use embedded_graphics::{image::{Image, ImageRaw}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::FONT_10X20}, pixelcolor::{BinaryColor, Rgb565}, prelude::*, primitives::{Polyline, PrimitiveStyle}, text::{Alignment, Baseline, Text, TextStyle, TextStyleBuilder}};
+use anyhow::Result;
+use embedded_graphics::{
+    mono_font::{MonoTextStyleBuilder, ascii::FONT_10X20},
+    pixelcolor::BinaryColor,
+};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
-    hal::{
-        gpio::{Gpio6, Gpio7, PinDriver},
-        i2c::{I2C0, I2cDriver, config::Config as I2cConfig},
-        modem::Modem,
-        peripherals::Peripherals,
-        prelude::Hertz,
-    },
+    hal::{gpio::PinDriver, modem::Modem, peripherals::Peripherals},
     log::EspLogger,
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
 };
-use std::time::{SystemTime, UNIX_EPOCH};
-use mini_mac::{glucose::sync_glucose::{GlucoseDatas, fetch_glucose}, market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock}, network::{connect_wifi, geo::{GeoInfo, fetch_geo_info}}, weather::{icons, sync_weather::{CurrentWeather, get_weather_icon}}};
-use mini_mac::time::sync_time;
-use mini_mac::weather::sync_weather::fetch_weather;
-use ssd1306::{
-    mode::{BufferedGraphicsMode, DisplayConfig},
-    prelude::{DisplaySize128x64, DisplayRotation, I2CInterface},
-    I2CDisplayInterface, Ssd1306,
+
+use mini_mac::{
+    glucose::sync_glucose::{GlucoseDatas, fetch_glucose},
+    market::{sync_crypto::fetch_btc_price, sync_market::fetch_stock},
+    network::{
+        connect_wifi,
+        geo::{GeoInfo, fetch_geo_info},
+    },
+    time::sync_time,
+    ui::{
+        Screen,
+        display::{draw_no_data, init_display, show_boot_image},
+        draw_clock, draw_glucose, draw_market, draw_weather,
+    },
+    weather::sync_weather::{CurrentWeather, fetch_weather},
 };
-use tinybmp::Bmp;
 
-/// Alias pour le type concret de l'écran : sans lui, chaque signature de
-/// fonction qui manipule l'écran devrait répéter ce type générique complet.
-type Display = Ssd1306<
-    I2CInterface<I2cDriver<'static>>,
-    DisplaySize128x64,
-    BufferedGraphicsMode<DisplaySize128x64>,
->;
-
-const CENTER_MIDDLE_TEXT_STYLE: TextStyle = TextStyleBuilder::new()
-    .alignment(Alignment::Center)
-    .baseline(Baseline::Middle)
-    .build();
-
-const CENTER_RIGHT_TEXT_STYLE: TextStyle = TextStyleBuilder::new()
-    .alignment(Alignment::Right)
-    .baseline(Baseline::Middle)
-    .build();
-
-enum Screen {
-    Clock,
-    Weather,
-    Crypto,
-    Market,
-    Glucose,
-}
-
-impl Screen {
-    fn next(self) -> Self {
-        match self {
-            Screen::Clock => Screen::Weather,
-            Screen::Weather => Screen::Crypto,
-            Screen::Crypto => Screen::Market,
-            Screen::Market  => Screen::Glucose,
-            Screen::Glucose => Screen::Clock,
-        }
-    }
-}
-
-fn init_display(i2c0: I2C0, sda: Gpio6, scl: Gpio7) -> Result<Display> {
-    let i2c = I2cDriver::new(i2c0, sda, scl, &I2cConfig::new().baudrate(Hertz(400_000)))?;
-
-    let interface = I2CDisplayInterface::new(i2c);
-    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
-        .into_buffered_graphics_mode();
-    display
-        .init()
-        .map_err(|err| anyhow!("Failed to initialize display: {err:?}"))?;
-
-    Ok(display)
-}
-
-fn show_boot_image(display: &mut Display) -> Result<()> {
-    let bmp = Bmp::from_slice(include_bytes!("../asset/images/hello2.bmp"))
-        .map_err(|err| anyhow!("Failed to parse boot bitmap: {err:?}"))?;
-    let image: Image<Bmp<Rgb565>> = Image::new(&bmp, Point::new(0, 0));
-
-    image
-        .draw(&mut display.color_converted())
-        .map_err(|err| anyhow!("Failed to draw boot bitmap: {err:?}"))?;
-    display
-        .flush()
-        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
-
-    Ok(())
-}
-
-fn draw_clock(
-    display: &mut Display,
-    h: u8, m: u8, s: u8,
-    style: MonoTextStyle<BinaryColor>,
-) -> Result<()> {
-    display
-        .clear(BinaryColor::Off)
-        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
-    Text::with_text_style(
-        &format!("{h:02}:{m:02}:{s:02}"),
-        Point::new(64, 32),
-        style,  CENTER_MIDDLE_TEXT_STYLE,
-    )
-    .draw(display)
-    .map_err(|err| anyhow!("Failed to draw clock: {err:?}"))?;
-    display
-        .flush()
-        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
-
-    Ok(())
-}
-
-fn draw_weather(
-    display: &mut Display,
-    weather: &CurrentWeather,
-    geo: &GeoInfo,
-    style: MonoTextStyle<BinaryColor>
-) -> Result<()> {
-    let raw: ImageRaw<BinaryColor> = ImageRaw::new(get_weather_icon(weather.weathercode), icons::ICON_LARGE_WIDTH);
-    let image = Image::new(&raw, Point::new(5, 5));
-
-    display
-        .clear(BinaryColor::Off)
-        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
-    image
-        .draw(&mut display.color_converted())
-        .map_err(|err| anyhow!("Failed to draw icon bitmap: {err:?}"))?;
-    Text::with_text_style(
-        &format!("{}", geo.city),
-        Point::new(128, 54),
-        style, CENTER_RIGHT_TEXT_STYLE
-    )
-    .draw(display)
-    .map_err(|err| anyhow!("Failed to draw city: {err:?}"))?;
-    Text::with_text_style(
-        &format!("{:.1} C", weather.temperature_2m),
-        Point::new(128, 32),
-        style,  CENTER_RIGHT_TEXT_STYLE,
-    )
-    .draw(display)
-    .map_err(|err| anyhow!("Failed to draw temperature: {err:?}"))?;
-    display
-        .flush()
-        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
-    Ok(())
-}
-
-
-fn draw_market(
-    display: &mut Display,
-    symbol: &str,
-    history: &[f32],
-    style: MonoTextStyle<BinaryColor>,
-) -> Result<()> {
-    display
-        .clear(BinaryColor::Off)
-        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
-
-    let current_price = *history.last().unwrap_or(&0.0);
-    Text::with_text_style(
-        &format!("{symbol} ${current_price:.2}"),
-        Point::new(64, 12),
-        style, CENTER_MIDDLE_TEXT_STYLE,
-    )
-    .draw(display)
-    .map_err(|err| anyhow!("Failed to draw price: {err:?}"))?;
-
-    if history.len() >= 2 {
-        let min = history.iter().cloned().fold(f32::INFINITY, f32::min);
-        let max = history.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let range = (max - min).max(1.0);
-
-        const GRAPH_LEFT: i32 = 4;
-        const GRAPH_RIGHT: i32 = 124;
-        const GRAPH_TOP: i32 = 26;
-        const GRAPH_HEIGHT: i32 = 32;
-
-        let span = (GRAPH_RIGHT - GRAPH_LEFT) as f32 / (history.len() - 1) as f32;
-        let points: Vec<Point> = history
-            .iter()
-            .enumerate()
-            .map(|(i, &price)| {
-                let x = GRAPH_LEFT + (i as f32 * span) as i32;
-                let y = GRAPH_TOP + GRAPH_HEIGHT - ((price - min) / range * GRAPH_HEIGHT as f32) as i32;
-                Point::new(x, y)
-            })
-            .collect();
-
-        Polyline::new(&points)
-            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-            .draw(display)
-            .map_err(|err| anyhow!("Failed to draw price trend: {err:?}"))?;
-    }
-
-    display
-        .flush()
-        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
-    Ok(())
-}
-
-fn draw_glucose(
-    display: &mut Display,
-    history: &[GlucoseDatas],
-    style: MonoTextStyle<BinaryColor>
-) -> Result<()> {
-    display
-        .clear(BinaryColor::Off)
-        .map_err(|err| anyhow!("Failed to clear display: {err:?}"))?;
-
-    let now = SystemTime::now();
-    let duration = now.duration_since(UNIX_EPOCH)?;
-    let now_ms = duration.as_millis();
-
-    let current_sugar = history.first();
-    let message = match current_sugar {
-        None => "NO DATA".to_string(),
-        Some(sugar) if sugar.age_minutes(now_ms) >= 10 => {
-            format!("{} OLD", sugar.sgv)
-        }
-        Some(sugar) => format!("{} mg/dL", sugar.sgv),
-    };
-
-    Text::with_text_style(
-        &message,
-        Point::new(64, 12),
-        style, CENTER_MIDDLE_TEXT_STYLE,
-    )
-    .draw(display)
-    .map_err(|err| anyhow!("Failed to draw glucose: {err:?}"))?;
-
-    let glucose_values: Vec<f32> = history
-        .iter()
-        .rev()
-        .map(|x| x.sgv as f32)
-        .collect();
-
-    if glucose_values.len() > 3 {
-        let min = glucose_values.iter().cloned().fold(f32::INFINITY, f32::min);
-        let max = glucose_values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let range = (max - min).max(1.0);
-
-        const GRAPH_LEFT: i32 = 4;
-        const GRAPH_RIGHT: i32 = 124;
-        const GRAPH_TOP: i32 = 26;
-        const GRAPH_HEIGHT: i32 = 32;
-
-        let span = (GRAPH_RIGHT - GRAPH_LEFT) as f32 / (history.len() - 1) as f32;
-        let points: Vec<Point> = glucose_values
-            .iter()
-            .enumerate()
-            .map(|(i, &glucose)| {
-                let x = GRAPH_LEFT + (i as f32 * span) as i32;
-                let y = GRAPH_TOP + GRAPH_HEIGHT - ((glucose - min) / range * GRAPH_HEIGHT as f32) as i32;
-                Point::new(x, y)
-            })
-            .collect();
-
-        Polyline::new(&points)
-            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-            .draw(display)
-            .map_err(|err| anyhow!("Failed to draw glucose trend: {err:?}"))?;
-    }
-
-    display
-        .flush()
-        .map_err(|err| anyhow!("Failed to flush display buffer: {err:?}"))?;
-    Ok(())
-}
+const MAX_HISTORY: usize = 30;
+const PROXY_IP: u8 = 34;
+const GLUCOSE_BROADCAST: u16 = 17580;
 
 fn init_wifi(
     modem: Modem,
     sys_loop: EspSystemEventLoop,
     nvs: EspDefaultNvsPartition,
 ) -> Result<BlockingWifi<EspWifi<'static>>> {
-    let mut wifi =
-        BlockingWifi::wrap(EspWifi::new(modem, sys_loop.clone(), Some(nvs))?, sys_loop)?;
+    let mut wifi = BlockingWifi::wrap(EspWifi::new(modem, sys_loop.clone(), Some(nvs))?, sys_loop)?;
     connect_wifi::connect_wifi(&mut wifi)?;
 
     let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
@@ -298,57 +62,46 @@ fn main() -> Result<()> {
 
     let touch = PinDriver::input(peripherals.pins.gpio4)?;
 
-    let mut display = init_display(peripherals.i2c0, peripherals.pins.gpio6, peripherals.pins.gpio7)?;
+    let mut display = init_display(
+        peripherals.i2c0,
+        peripherals.pins.gpio6,
+        peripherals.pins.gpio7,
+    )?;
     show_boot_image(&mut display)?;
 
     let _wifi = init_wifi(peripherals.modem, sys_loop, nvs)?;
 
-    let geo = fetch_geo_info()?;
-    log::info!("City: {}, Timezone offset: {}s", geo.city, geo.offset);
+    let mut geo = None;
+    refresh_geo(&mut geo);
 
-    let mut weather = fetch_weather(geo.lat, geo.lon)?;
-    log::info!(
-        "Weather: {}°C, code {}",
-        weather.temperature_2m,
-        weather.weathercode
-    );
+    let mut weather = None;
+    refresh_weather(geo.as_ref(), &mut weather);
 
-    const MAX_HISTORY: usize = 30;
     const REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
     const SCREEN_CHANGE_INTERVAL: Duration = Duration::from_secs(20);
-    let mut btc_history: Vec<f32> = vec![fetch_btc_price()?];
+    let mut btc_history: Vec<f32> = vec![];
+    refresh_btc(&mut btc_history);
     let mut last_fetch = Instant::now();
-    log::info!("BTC price: ${:.0}", btc_history[0]);
 
-    let mut stock_history: Vec<f32> = vec![fetch_stock("QCOM")?];
-    log::info!("QCOM price: ${:.0}", stock_history[0]);
+    let mut stock_history: Vec<f32> = vec![];
+    refresh_stock(&mut stock_history);
 
-    const PROXY_IP: u8 = 67;
-    const GLUCOSE_BROADCAST: u16 = 17580;
     let mut glucose_history: Vec<GlucoseDatas> = vec![];
-    match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
-        Result::Ok(glucose) if glucose.is_empty() => {
-            log::warn!("Juggluco returned no glucose data");
-        }
-        Result::Ok(glucose) => {
-            log::info!("Glucose: {}", glucose[0].sgv);
-            glucose_history = glucose;
-        }
-        Result::Err(error) => {
-            log::warn!("Failed to fetch glucose data : {error}");
-        }
-    }
-    const GLUCOSE_REFRESH_INTERVAL: Duration = Duration::from_mins(1);
+    refresh_glucose(&mut glucose_history);
+    const GLUCOSE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
     let mut glucose_refresh = Instant::now();
 
-    sync_time::sync_ntp()?;
-    let (mut h, mut m, mut s) = sync_time::get_local_time(geo.offset);
+    if let Err(error) = sync_time::sync_ntp() {
+        log::warn!("Failed to sync time: {error}");
+    }
+    let timezone_offset = geo.as_ref().map_or(0, |geo| geo.offset);
+    let (mut h, mut m, mut s) = sync_time::get_local_time(timezone_offset);
     log::info!("Local time: {h:02}:{m:02}:{s:02}");
 
-    let style =MonoTextStyleBuilder::new()
-    .font(&FONT_10X20)
-    .text_color(BinaryColor::On)
-    .build();
+    let style = MonoTextStyleBuilder::new()
+        .font(&FONT_10X20)
+        .text_color(BinaryColor::On)
+        .build();
 
     let mut was_touched = false;
 
@@ -359,61 +112,37 @@ fn main() -> Result<()> {
     loop {
         let is_touched = touch.is_high();
 
-        if is_touched && !was_touched {
-            current_screen = current_screen.next();
-            rotation_clock = Instant::now();
-        } else if rotation_clock.elapsed() >= SCREEN_CHANGE_INTERVAL {
+        if (is_touched && !was_touched) || rotation_clock.elapsed() >= SCREEN_CHANGE_INTERVAL {
             current_screen = current_screen.next();
             rotation_clock = Instant::now();
         }
         was_touched = is_touched;
-        
+
         if last_fetch.elapsed() >= REFRESH_INTERVAL {
-            if let Result::Ok(price) = fetch_btc_price() {
-                btc_history.push(price);
-                if btc_history.len() > MAX_HISTORY {
-                    btc_history.remove(0);
-                }
-                log::info!("BTC price: ${price:.0}");
-            }
-            if let Result::Ok(weather_up) = fetch_weather(geo.lat, geo.lon) {
-                weather = weather_up;
-                log::info!("Weather: {}°C, code {}", weather.temperature_2m,weather.weathercode);
-            }
-            if let Result::Ok(price) = fetch_stock("QCOM") {
-                stock_history.push(price);
-                if stock_history.len() > MAX_HISTORY {
-                    stock_history.remove(0);
-                }
-                log::info!("QCOM price: ${price:.0}");
-            }
+            refresh_geo(&mut geo);
+            refresh_btc(&mut btc_history);
+            refresh_weather(geo.as_ref(), &mut weather);
+            refresh_stock(&mut stock_history);
             last_fetch = Instant::now();
         }
 
         if glucose_refresh.elapsed() >= GLUCOSE_REFRESH_INTERVAL {
-            match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
-                Result::Ok(glucose) if glucose.is_empty() => {
-                    log::warn!("Juggluco returned no glucose data");
-                }
-                Result::Ok(glucose) => {
-                    log::info!("Glucose: {}", glucose[0].sgv);
-                    glucose_history = glucose;
-                } 
-                Result::Err(error) => {
-                    log::warn!("Failed to fetch glucose data : {error}");
-                }
-            }
+            refresh_glucose(&mut glucose_history);
             glucose_refresh = Instant::now();
         }
 
         match current_screen {
             Screen::Clock => {
                 draw_clock(&mut display, h, m, s, style)?;
-                (h, m, s) = sync_time::get_local_time(geo.offset);
+                let timezone_offset = geo.as_ref().map_or(0, |geo| geo.offset);
+                (h, m, s) = sync_time::get_local_time(timezone_offset);
             }
-            Screen::Weather => {
-                draw_weather(&mut display, &weather, &geo, style)?;
-            }
+            Screen::Weather => match (&weather, &geo) {
+                (Some(weather), Some(geo)) => {
+                    draw_weather(&mut display, weather, geo, style)?;
+                }
+                _ => draw_no_data(&mut display, "WEATHER", style)?,
+            },
             Screen::Crypto => {
                 draw_market(&mut display, "BTC", &btc_history, style)?;
             }
@@ -426,5 +155,83 @@ fn main() -> Result<()> {
         }
 
         thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn refresh_btc(btc_history: &mut Vec<f32>) {
+    match fetch_btc_price() {
+        Ok(price) => {
+            btc_history.push(price);
+            if btc_history.len() > MAX_HISTORY {
+                btc_history.remove(0);
+            }
+            log::info!("BTC price: ${price:.0}");
+        }
+        Err(error) => {
+            log::warn!("Failed to fetch BTC price: {error}");
+        }
+    }
+}
+
+fn refresh_stock(stock_history: &mut Vec<f32>) {
+    match fetch_stock("QCOM") {
+        Ok(price) => {
+            stock_history.push(price);
+            if stock_history.len() > MAX_HISTORY {
+                stock_history.remove(0);
+            }
+            log::info!("QCOM price: ${price:.0}");
+        }
+        Err(error) => {
+            log::warn!("Failed to fetch stock: {error}");
+        }
+    }
+}
+
+fn refresh_geo(geo: &mut Option<GeoInfo>) {
+    match fetch_geo_info() {
+        Ok(geo_up) => {
+            log::info!("City: {}, Timezone offset: {}s", geo_up.city, geo_up.offset);
+            *geo = Some(geo_up);
+        }
+        Err(error) => {
+            log::warn!("Failed to fetch location: {error}");
+        }
+    }
+}
+
+fn refresh_weather(geo: Option<&GeoInfo>, weather: &mut Option<CurrentWeather>) {
+    let Some(geo) = geo else {
+        log::warn!("Cannot fetch weather without location data");
+        return;
+    };
+
+    match fetch_weather(geo.lat, geo.lon) {
+        Ok(weather_up) => {
+            log::info!(
+                "Weather: {}°C, code {}",
+                weather_up.temperature_2m,
+                weather_up.weathercode
+            );
+            *weather = Some(weather_up);
+        }
+        Err(error) => {
+            log::warn!("Failed to fetch weather: {error}");
+        }
+    }
+}
+
+fn refresh_glucose(glucose_history: &mut Vec<GlucoseDatas>) {
+    match fetch_glucose(PROXY_IP, GLUCOSE_BROADCAST) {
+        Ok(glucose) if glucose.is_empty() => {
+            log::warn!("Juggluco returned no glucose data");
+        }
+        Ok(glucose) => {
+            log::info!("Glucose: {}", glucose[0].sgv);
+            *glucose_history = glucose;
+        }
+        Err(error) => {
+            log::warn!("Failed to fetch glucose data : {error}");
+        }
     }
 }
