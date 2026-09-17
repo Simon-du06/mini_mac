@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Ok, Result, anyhow, Context};
-use esp_idf_svc::{http::status::OK, sntp::{EspSntp, SyncStatus}};
+use esp_idf_svc::sntp::{EspSntp, SyncStatus};
 
 pub fn sync_ntp() -> Result<()> {
     let sntp = EspSntp::new_default()?;

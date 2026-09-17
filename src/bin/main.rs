@@ -95,7 +95,7 @@ fn main() -> Result<()> {
         log::warn!("Failed to sync time: {error}");
     }
     let timezone_offset = geo.as_ref().map_or(0, |geo| geo.offset);
-    let (mut h, mut m, mut s) = sync_time::get_local_time(timezone_offset);
+    let (mut h, mut m, mut s) = sync_time::get_local_time(timezone_offset)?;
     log::info!("Local time: {h:02}:{m:02}:{s:02}");
 
     let style = MonoTextStyleBuilder::new()
@@ -135,7 +135,7 @@ fn main() -> Result<()> {
             Screen::Clock => {
                 draw_clock(&mut display, h, m, s, style)?;
                 let timezone_offset = geo.as_ref().map_or(0, |geo| geo.offset);
-                (h, m, s) = sync_time::get_local_time(timezone_offset);
+                (h, m, s) = sync_time::get_local_time(timezone_offset)?;
             }
             Screen::Weather => match (&weather, &geo) {
                 (Some(weather), Some(geo)) => {
