@@ -19,7 +19,7 @@ impl GlucoseDatas {
 }
 
 pub fn fetch_glucose(ip: u8, port: u16) -> Result<Vec<GlucoseDatas>> {
-    let url = &format!("http://192.168.1.{ip}:{port}/sgv.json?count=10&interval=60&brief_mode=Y");
+    let url = &format!("http://192.168.1.{ip}:{port}/sgv.json?count=12&interval=60&brief_mode=Y");
     let json = http_get(url);
     let res = serde_json::from_str::<Vec<GlucoseDatas>>(&json?);
     Ok(res?)

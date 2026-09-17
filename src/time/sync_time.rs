@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Result, anyhow};
-use esp_idf_svc::sntp::{EspSntp, SyncStatus};
+use anyhow::{Ok, Result, anyhow, Context};
+use esp_idf_svc::{http::status::OK, sntp::{EspSntp, SyncStatus}};
 
 pub fn sync_ntp() -> Result<()> {
     let sntp = EspSntp::new_default()?;
@@ -16,17 +16,18 @@ pub fn sync_ntp() -> Result<()> {
     Ok(())
 }
 
-pub fn get_local_time(offset_secs: i32) -> (u8, u8, u8) {
+pub fn get_local_time(offset_secs: i32) -> Result<(u8, u8, u8)> {
     let timestamp_utc = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .context("System clock is earlier than Unix epoch")?
         .as_secs();
-    let local_secs = (timestamp_utc as i64 + offset_secs as i64) as u64;
 
+    let local_secs = (timestamp_utc as i64 + offset_secs as i64) as u64;
     let seconds_per_day = local_secs % 86400;
+
     let hours = seconds_per_day / 3600;
     let minutes = (seconds_per_day % 3600) / 60;
     let seconds = seconds_per_day % 60;
 
-    (hours as u8, minutes as u8, seconds as u8)
+    Ok((hours as u8, minutes as u8, seconds as u8))
 }

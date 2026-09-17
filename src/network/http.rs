@@ -7,6 +7,7 @@ use log::{error, info};
 
 pub fn http_get(url: &str) -> Result<String> {
     let config = Configuration {
+        timeout: Some(std::time::Duration::from_secs(7)),
         crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
         ..Default::default()
     };
