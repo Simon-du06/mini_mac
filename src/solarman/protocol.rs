@@ -1,6 +1,53 @@
-use anyhow::Result;
-
 fn modbus_crc16(data: &[u8]) -> u16 {
     let mut crc: u16 = 0xFFFF;
 
+    for &byte in data {
+        crc ^= u16::from(byte);
+        for _ in 0..8 {
+            let last_bit_is_one = crc & 1 != 0;
+            crc >>= 1;
+            if last_bit_is_one {
+                crc ^= 0xA001;
+            }
+        }
+    }
+    crc
+}
+
+pub fn build_modbus_read_request(
+    slave_id: u8,
+    register: u16,
+    quantity: u16,
+) -> Vec<u8> {
+    let mut request: Vec<u8> = vec![];
+    const FUNC_CODE: u8 = 0x03;
+
+    request.push(slave_id);
+    request.push(FUNC_CODE);
+    let register_vec = register.to_be_bytes();
+    request.extend_from_slice(&register_vec);
+    let quantity_vec = quantity.to_be_bytes();
+    request.extend_from_slice(&quantity_vec);
+    
+    let crc = modbus_crc16(&request);
+    let crc_le = crc.to_le_bytes();
+    request.extend_from_slice(&crc_le);
+
+    request
+}
+
+#[test]
+fn crc_matches_real_solarman_request() {
+    let request = [0x01, 0x03, 0x04, 0x04, 0x00, 0x01];
+
+    let crc = modbus_crc16(&request);
+
+    assert_eq!(crc, 0xFBC4);
+}
+
+#[test]
+fn modbus_request_match () {
+    let request = build_modbus_read_request(1, 0x0404, 1);
+
+    assert_eq!(request, [0x01, 0x03, 0x04, 0x04, 0x00, 0x01, 0xC4, 0xFB]);
 }
