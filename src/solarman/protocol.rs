@@ -36,6 +36,17 @@ pub fn build_modbus_read_request(
     request
 }
 
+fn build_solarman_payload(modbus_request: &[u8]) -> Vec<u8> {
+    let mut payload: Vec<u8> = vec![];
+
+    payload.push(0x02);
+    for _ in 0..14 {
+        payload.push(0x00);
+    }
+    payload.extend_from_slice(modbus_request);
+    payload
+}
+
 #[test]
 fn crc_matches_real_solarman_request() {
     let request = [0x01, 0x03, 0x04, 0x04, 0x00, 0x01];
@@ -50,4 +61,15 @@ fn modbus_request_match () {
     let request = build_modbus_read_request(1, 0x0404, 1);
 
     assert_eq!(request, [0x01, 0x03, 0x04, 0x04, 0x00, 0x01, 0xC4, 0xFB]);
+}
+
+#[test]
+fn solarman_payload_wraps_modbus_request() {
+    let modbus_request = build_modbus_read_request(1, 0x0404, 1);
+    let payload = build_solarman_payload(&modbus_request);
+
+    assert_eq!(payload.len(), 23);
+    assert_eq!(payload[0], 0x02);
+    assert!(payload[1..15].iter().all(|&byte| byte == 0));
+    assert_eq!(&payload[15..], modbus_request.as_slice());
 }
