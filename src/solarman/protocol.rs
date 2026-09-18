@@ -14,7 +14,7 @@ fn modbus_crc16(data: &[u8]) -> u16 {
     crc
 }
 
-pub fn build_modbus_read_request(
+fn build_modbus_read_request(
     slave_id: u8,
     register: u16,
     quantity: u16,
@@ -91,6 +91,21 @@ fn solarman_checksum(frame: &[u8]) -> u8 {
     checksum
 }
 
+pub fn build_read_frame(
+    logger_serial: u32,
+    sequence: u16,
+    register: u16,
+    quantity: u16,
+) -> Vec<u8> {
+    let modbus_request = build_modbus_read_request(1, register, quantity);
+
+    let payload = &build_solarman_payload(&modbus_request);
+
+    let frame = build_solarman_frame(logger_serial, sequence, payload);
+
+    frame
+}
+
 
 #[test]
 fn crc_matches_real_solarman_request() {
@@ -149,4 +164,16 @@ fn solarman_frame_has_checksum_and_end_marker() {
 
     assert_eq!(frame[34], 0x45);
     assert_eq!(frame[35], 0x15);
+}
+
+#[test]
+fn public_read_frame_remains_read_only() {
+    let frame = build_read_frame(0x01020304, 1, 0x0404, 1);
+
+    assert_eq!(frame.len(), 36);
+    assert_eq!(frame[0], 0xA5);
+    assert_eq!(frame[26], 0x01);
+    assert_eq!(frame[27], 0x03);
+    assert_eq!(&frame[28..30], [0x04, 0x04]);
+    assert_eq!(frame.last(), Some(&0x15));
 }
