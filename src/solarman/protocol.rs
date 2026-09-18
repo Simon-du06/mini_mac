@@ -74,8 +74,23 @@ fn build_solarman_frame(
     //add the payload next to the request
     head.extend_from_slice(payload);
 
+    //checksum
+    head.push(solarman_checksum(&head));
+
+    head.push(0x15);
+
     head
 }
+
+fn solarman_checksum(frame: &[u8]) -> u8 {
+    let mut checksum: u8 = 0;
+
+    for i in 1..frame.len() {
+        checksum = checksum.wrapping_add(frame[i]);
+    }
+    checksum
+}
+
 
 #[test]
 fn crc_matches_real_solarman_request() {
@@ -110,9 +125,28 @@ fn solarman_frame_has_expected_header() {
     let payload = build_solarman_payload(&modbus_request);
     let frame = build_solarman_frame(0x01020304, 1, &payload);
 
-    assert_eq!(frame.len(), 34);
+    assert_eq!(frame.len(), 36);
     assert_eq!(&frame[..11], [
         0xA5, 0x17, 0x00, 0x10, 0x45, 0x01, 0x00, 0x04, 0x03, 0x02, 0x01,
     ]);
-    assert_eq!(&frame[11..], payload.as_slice());
+    assert_eq!(&frame[11..34], payload.as_slice());
+}
+
+#[test]
+fn solarman_checksum_matches_reference_frame() {
+    let modbus_request = build_modbus_read_request(1, 0x0404, 1);
+    let payload = build_solarman_payload(&modbus_request);
+    let frame = build_solarman_frame(0x01020304, 1, &payload);
+
+    assert_eq!(solarman_checksum(&frame[..34]), 0x45);
+}
+
+#[test]
+fn solarman_frame_has_checksum_and_end_marker() {
+    let modbus_request = build_modbus_read_request(1, 0x0404, 1);
+    let payload = build_solarman_payload(&modbus_request);
+    let frame = build_solarman_frame(0x01020304, 1, &payload);
+
+    assert_eq!(frame[34], 0x45);
+    assert_eq!(frame[35], 0x15);
 }
